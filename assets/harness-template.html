@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design Explorer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    min-height: 100vh;
+  }
+
+  /* --- Sticky Header --- */
+  .dex-header {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: rgba(15, 15, 15, 0.95);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid #222;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .dex-header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #aaa;
+    margin-right: auto;
+  }
+
+  .dex-summary { font-size: 13px; color: #666; }
+  .dex-summary .rated { color: #4a9eff; }
+
+  .dex-btn {
+    padding: 6px 14px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: #1a1a1a;
+    color: #ccc;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .dex-btn:hover { background: #252525; border-color: #444; }
+  .dex-btn.active { border-color: #e74c3c; background: #2a1515; color: #ff6b6b; }
+  .dex-btn.draw-active { border-color: #f39c12; background: #2a2515; color: #f1c40f; }
+  .dex-btn.submit { border-color: #2ecc71; color: #2ecc71; }
+  .dex-btn.submit:hover { background: #152a1a; }
+
+  /* Audio device selector */
+  .dex-select {
+    padding: 4px 8px;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background: #1a1a1a;
+    color: #aaa;
+    font-size: 11px;
+    max-width: 160px;
+    cursor: pointer;
+  }
+
+  /* Recording indicator + waveform */
+  .rec-group {
+    display: none;
+    align-items: center;
+    gap: 8px;
+  }
+  .rec-group.visible { display: flex; }
+
+  .rec-dot {
+    width: 12px; height: 12px;
+    background: #e74c3c;
+    border-radius: 50%;
+    animation: pulse 1s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  #waveform {
+    border-radius: 4px;
+    background: #181818;
+    border: 1px solid #333;
+  }
+
+  .rec-timer {
+    font-variant-numeric: tabular-nums;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ff6b6b;
+    min-width: 36px;
+  }
+
+  /* Audio level bar */
+  .audio-level {
+    width: 6px;
+    height: 28px;
+    background: #181818;
+    border: 1px solid #333;
+    border-radius: 3px;
+    overflow: hidden;
+    display: none;
+    position: relative;
+  }
+  .audio-level.visible { display: block; }
+  .audio-level-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 0%;
+    background: #2ecc71;
+    transition: height 0.05s;
+    border-radius: 0 0 2px 2px;
+  }
+
+  .audio-warning {
+    display: none;
+    font-size: 11px;
+    color: #e74c3c;
+    font-weight: 600;
+  }
+  .audio-warning.visible { display: block; }
+
+  .audio-device-label {
+    display: none;
+    font-size: 10px;
+    color: #555;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .audio-device-label.visible { display: block; }
+
+  /* Status toast */
+  .dex-toast {
+    position: fixed;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(20, 20, 20, 0.95);
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 13px;
+    color: #ccc;
+    z-index: 2000;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .dex-toast.visible { opacity: 1; }
+  .dex-toast.error { border-color: #e74c3c; color: #ff6b6b; }
+  .dex-toast.success { border-color: #2ecc71; color: #2ecc71; }
+
+  /* --- Mockup Sections --- */
+  .mockup-section {
+    margin: 24px 20px;
+    border: 2px solid #1a1a1a;
+    border-radius: 12px;
+    overflow: hidden;
+    transition: border-color 0.2s, opacity 0.3s;
+  }
+  .mockup-section.hovered { border-color: #4a9eff44; box-shadow: 0 0 20px #4a9eff11; }
+  .mockup-section.dimmed { opacity: 0.4; }
+
+  .mockup-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: #111;
+    border-bottom: 1px solid #1a1a1a;
+    position: relative;
+    z-index: 20;
+  }
+
+  .mockup-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: #ccc;
+    flex: 1;
+  }
+
+  .rating-buttons { display: flex; gap: 6px; }
+  .rating-buttons button {
+    width: 36px; height: 32px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: #1a1a1a;
+    color: #666;
+    font-size: 18px;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+    z-index: 25;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .rating-buttons button:hover { background: #252525; }
+  .rating-buttons button[data-rating="down"].selected {
+    background: #3a1515; border-color: #e74c3c; color: #ff6b6b;
+  }
+  .rating-buttons button[data-rating="up"].selected {
+    background: #153a15; border-color: #2ecc71; color: #2ecc71;
+  }
+
+  .mockup-content {
+    position: relative;
+    background: #fff;
+    color: #000;
+  }
+
+  .annotation-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 50;
+  }
+  body.draw-mode .annotation-canvas {
+    pointer-events: auto;
+    cursor: crosshair;
+  }
+
+  body.draw-mode .mockup-content {
+    outline: 2px dashed #f39c1266;
+    outline-offset: -2px;
+  }
+
+  .annotation-badge {
+    position: absolute;
+    top: 8px; right: 8px;
+    background: rgba(231, 76, 60, 0.85);
+    color: #fff;
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  .feedback-panel {
+    border-top: 1px solid #1a1a1a;
+    background: #0d0d0d;
+  }
+  .feedback-toggle {
+    width: 100%; padding: 8px 16px;
+    background: none; border: none;
+    color: #555; font-size: 12px;
+    cursor: pointer; text-align: left;
+  }
+  .feedback-toggle:hover { color: #888; }
+  .feedback-body { display: none; padding: 12px 16px; }
+  .feedback-body.open { display: block; }
+  .feedback-body textarea {
+    width: 100%; min-height: 60px; padding: 8px 10px;
+    background: #111; border: 1px solid #222; border-radius: 6px;
+    color: #ccc; font-size: 13px; resize: vertical; font-family: inherit;
+  }
+  .feedback-body textarea:focus { outline: none; border-color: #4a9eff; }
+  .annotation-thumbnails {
+    display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;
+  }
+  .annotation-thumb {
+    width: 80px; height: 60px;
+    border: 1px solid #333; border-radius: 4px;
+    object-fit: cover; cursor: pointer;
+    background: #000;
+  }
+  .voice-transcripts {
+    margin-top: 8px; font-size: 12px; color: #666; white-space: pre-wrap;
+  }
+
+  .shortcuts-hint {
+    position: fixed; bottom: 16px; right: 16px;
+    background: rgba(20, 20, 20, 0.9);
+    border: 1px solid #333; border-radius: 8px;
+    padding: 10px 14px; font-size: 12px; color: #666;
+    z-index: 500; line-height: 1.6;
+  }
+  .shortcuts-hint kbd {
+    display: inline-block; padding: 1px 6px;
+    background: #222; border: 1px solid #444; border-radius: 3px;
+    color: #aaa; font-family: inherit; font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<div class="dex-header">
+  <h1>Design Explorer</h1>
+  <div class="dex-summary"><span class="rated">0</span> rated</div>
+
+  <div class="rec-group" id="rec-group">
+    <div class="rec-dot"></div>
+    <canvas id="waveform" width="200" height="32"></canvas>
+    <span class="rec-timer" id="rec-timer">0:00</span>
+  </div>
+  <div class="audio-level" id="audio-level"><div class="audio-level-fill" id="audio-level-fill"></div></div>
+  <span class="audio-device-label" id="audio-device-label"></span>
+  <span class="audio-warning" id="audio-warning">⚠ No audio detected — check mic</span>
+
+  <select id="audio-device" class="dex-select" title="Audio input device">
+    <option value="">Default mic</option>
+  </select>
+  <button class="dex-btn" id="btn-record" title="Record critique (R)">🎤 Record</button>
+  <button class="dex-btn" id="btn-draw" title="Draw annotations (D)">✏️ Draw</button>
+  <button class="dex-btn submit" id="btn-submit" title="Submit all feedback">Submit</button>
+</div>
+
+<div class="dex-toast" id="toast"></div>
+
+<!-- === MOCKUP SECTIONS GO HERE === -->
+<!-- Claude appends <section class="mockup-section"> elements below -->
+
+
+<div class="shortcuts-hint">
+  <kbd>R</kbd> Record &nbsp;
+  <kbd>D</kbd> Draw &nbsp;
+  <kbd>Ctrl+Z</kbd> Undo stroke &nbsp;
+  <kbd>Esc</kbd> Cancel
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============================================================
+  // STATE
+  // ============================================================
+  const STORAGE_KEY = 'dex-draft';
+  let state = loadDraft();
+
+  let isRecording = false;
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let recordingStartTime = 0;
+  let timerInterval = null;
+  let hoverLog = [];
+  let annotationLog = [];
+  let currentHoveredMockup = null;
+  let audioCtx = null;
+  let analyser = null;
+  let audioLevelZeroSince = 0;
+
+  let isDrawMode = false;
+  let activeDrawSection = null;
+  let currentStroke = null;
+
+  // ============================================================
+  // DRAFT PERSISTENCE
+  // ============================================================
+  function loadDraft() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : freshState();
+    } catch { return freshState(); }
+  }
+  function freshState() {
+    return { ratings: {}, notes: {}, transcripts: [], strokes: {}, drawMode: false };
+  }
+  function saveDraft() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+  function clearDraft() {
+    state = freshState();
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
+  // ============================================================
+  // TOAST
+  // ============================================================
+  function showToast(msg, type, duration) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'dex-toast visible' + (type ? ' ' + type : '');
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => el.classList.remove('visible'), duration || 3000);
+  }
+
+  // ============================================================
+  // MOCKUP DISCOVERY
+  // ============================================================
+  function getMockups() { return Array.from(document.querySelectorAll('.mockup-section')); }
+
+  function findMockupUnderPoint(x, y) {
+    for (const m of getMockups()) {
+      const rect = m.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return m;
+    }
+    return null;
+  }
+
+  // ============================================================
+  // RATINGS + NOTES — EVENT DELEGATION
+  // (Works regardless of when mockup sections appear in DOM)
+  // ============================================================
+  document.addEventListener('click', (e) => {
+    // Rating button click (thumbs up/down)
+    const ratingBtn = e.target.closest('.rating-buttons button[data-rating]');
+    if (ratingBtn) {
+      const section = ratingBtn.closest('.mockup-section');
+      if (!section) return;
+      const id = section.dataset.mockupId;
+      const rating = ratingBtn.dataset.rating; // "up" or "down"
+
+      // Toggle: clicking same button deselects
+      if (state.ratings[id] === rating) {
+        delete state.ratings[id];
+        ratingBtn.classList.remove('selected');
+      } else {
+        state.ratings[id] = rating;
+        section.querySelectorAll('.rating-buttons button').forEach(b => b.classList.remove('selected'));
+        ratingBtn.classList.add('selected');
+      }
+      saveDraft();
+      updateSummary();
+      console.log(`Rated ${id}: ${state.ratings[id] || 'none'}`);
+      return;
+    }
+
+    // Feedback toggle click
+    const toggle = e.target.closest('.feedback-toggle');
+    if (toggle) {
+      const body = toggle.nextElementSibling;
+      if (body) {
+        body.classList.toggle('open');
+        toggle.textContent = body.classList.contains('open') ? '▾ Notes' : '▸ Notes';
+      }
+      return;
+    }
+  });
+
+  // Notes input — event delegation
+  document.addEventListener('input', (e) => {
+    if (e.target.matches('.feedback-body textarea')) {
+      const section = e.target.closest('.mockup-section');
+      if (section) {
+        state.notes[section.dataset.mockupId] = e.target.value;
+        saveDraft();
+      }
+    }
+  });
+
+  // Restore saved ratings + notes on init
+  function restoreState() {
+    for (const section of getMockups()) {
+      const id = section.dataset.mockupId;
+      // Restore rating (up/down)
+      if (state.ratings[id]) {
+        const btn = section.querySelector(`.rating-buttons button[data-rating="${state.ratings[id]}"]`);
+        if (btn) btn.classList.add('selected');
+      }
+      // Restore notes
+      if (state.notes[id]) {
+        const textarea = section.querySelector('.feedback-body textarea');
+        if (textarea) textarea.value = state.notes[id];
+      }
+    }
+    // Restore draw mode
+    if (state.drawMode) {
+      isDrawMode = true;
+      document.body.classList.add('draw-mode');
+      document.getElementById('btn-draw').classList.add('draw-active');
+      document.getElementById('btn-draw').textContent = '✏️ Drawing';
+    }
+  }
+
+  function updateSummary() {
+    const total = getMockups().length;
+    const rated = Object.keys(state.ratings).length;
+    const ups = Object.values(state.ratings).filter(r => r === 'up').length;
+    const downs = Object.values(state.ratings).filter(r => r === 'down').length;
+    document.querySelector('.dex-summary').innerHTML =
+      `<span class="rated">${rated}</span>/${total} rated` +
+      (ups || downs ? ` (👍${ups} 👎${downs})` : '');
+  }
+
+  // ============================================================
+  // PER-MOCKUP ANNOTATION CANVASES
+  // ============================================================
+  function initCanvases() {
+    for (const section of getMockups()) {
+      const content = section.querySelector('.mockup-content');
+      if (!content || section._canvas) continue; // skip if already initialized
+
+      const canvas = document.createElement('canvas');
+      canvas.className = 'annotation-canvas';
+      content.appendChild(canvas);
+
+      function sizeCanvas() {
+        canvas.width = content.offsetWidth;
+        canvas.height = content.offsetHeight;
+        redrawStrokes(section);
+      }
+      sizeCanvas();
+
+      section._canvas = canvas;
+      section._ctx = canvas.getContext('2d');
+      section._strokes = [];
+
+      // Restore saved strokes
+      const id = section.dataset.mockupId;
+      if (state.strokes[id]) {
+        section._strokes = state.strokes[id];
+        redrawStrokes(section);
+        updateAnnotationBadge(section);
+      }
+
+      canvas.addEventListener('mousedown', (e) => onDrawStart(section, e));
+      canvas.addEventListener('mousemove', (e) => onDrawMove(section, e));
+      canvas.addEventListener('mouseup', () => onDrawEnd(section));
+      canvas.addEventListener('mouseleave', () => { if (currentStroke) onDrawEnd(section); });
+
+      canvas.addEventListener('touchstart', (e) => { e.preventDefault(); onDrawStart(section, e.touches[0]); }, { passive: false });
+      canvas.addEventListener('touchmove', (e) => { e.preventDefault(); onDrawMove(section, e.touches[0]); }, { passive: false });
+      canvas.addEventListener('touchend', (e) => { e.preventDefault(); onDrawEnd(section); }, { passive: false });
+
+      new ResizeObserver(() => sizeCanvas()).observe(content);
+    }
+  }
+
+  function getCanvasCoords(section, e) {
+    const rect = section._canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function onDrawStart(section, e) {
+    if (!isDrawMode) return;
+    const pos = getCanvasCoords(section, e);
+    currentStroke = { points: [pos], color: '#e74c3c', width: 3 };
+    activeDrawSection = section;
+    section._ctx.strokeStyle = currentStroke.color;
+    section._ctx.lineWidth = currentStroke.width;
+    section._ctx.lineCap = 'round';
+    section._ctx.lineJoin = 'round';
+    section._ctx.beginPath();
+    section._ctx.moveTo(pos.x, pos.y);
+  }
+
+  function onDrawMove(section, e) {
+    if (!currentStroke || activeDrawSection !== section) return;
+    const pos = getCanvasCoords(section, e);
+    currentStroke.points.push(pos);
+    section._ctx.lineTo(pos.x, pos.y);
+    section._ctx.stroke();
+    section._ctx.beginPath();
+    section._ctx.moveTo(pos.x, pos.y);
+  }
+
+  function onDrawEnd(section) {
+    if (!currentStroke || activeDrawSection !== section) return;
+    if (currentStroke.points.length >= 2) {
+      section._strokes.push(currentStroke);
+      const id = section.dataset.mockupId;
+      state.strokes[id] = section._strokes;
+      saveDraft();
+      updateAnnotationBadge(section);
+
+      if (isRecording) {
+        annotationLog.push({ t: Date.now() - recordingStartTime, mockupId: id });
+      }
+    }
+    currentStroke = null;
+    activeDrawSection = null;
+  }
+
+  function redrawStrokes(section) {
+    const ctx = section._ctx;
+    const canvas = section._canvas;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const stroke of section._strokes) {
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.width;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < stroke.points.length; i++) {
+        const p = stroke.points[i];
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+    }
+  }
+
+  function undoLastStroke() {
+    const target = activeDrawSection ||
+      getMockups().filter(s => s._strokes && s._strokes.length > 0).pop();
+    if (!target || !target._strokes.length) return;
+    target._strokes.pop();
+    redrawStrokes(target);
+    state.strokes[target.dataset.mockupId] = target._strokes;
+    saveDraft();
+    updateAnnotationBadge(target);
+    showToast('Stroke undone', null, 1000);
+  }
+
+  function updateAnnotationBadge(section) {
+    let badge = section.querySelector('.annotation-badge');
+    const count = section._strokes.length;
+    if (count === 0) { if (badge) badge.remove(); return; }
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.className = 'annotation-badge';
+      section.querySelector('.mockup-content').appendChild(badge);
+    }
+    badge.textContent = count + ' stroke' + (count > 1 ? 's' : '');
+  }
+
+  function toggleDrawMode() {
+    isDrawMode = !isDrawMode;
+    document.body.classList.toggle('draw-mode', isDrawMode);
+    document.getElementById('btn-draw').classList.toggle('draw-active', isDrawMode);
+    document.getElementById('btn-draw').textContent = isDrawMode ? '✏️ Drawing' : '✏️ Draw';
+    state.drawMode = isDrawMode;
+    saveDraft();
+    showToast(isDrawMode ? 'Draw mode ON — draw on mockups' : 'Draw mode OFF', null, 1500);
+  }
+
+  // ============================================================
+  // ANNOTATION CAPTURE (composite + position metadata)
+  // ============================================================
+  async function captureAnnotation(section) {
+    const content = section.querySelector('.mockup-content');
+    const canvas = section._canvas;
+    if (!canvas || !section._strokes.length) return null;
+
+    const width = content.offsetWidth;
+    const height = content.offsetHeight;
+
+    // Compute stroke bounding boxes as percentages
+    const strokeRegions = section._strokes.map(s => {
+      const xs = s.points.map(p => p.x);
+      const ys = s.points.map(p => p.y);
+      return {
+        xPct: Math.round((Math.min(...xs) / width) * 100),
+        yPct: Math.round((Math.min(...ys) / height) * 100),
+        wPct: Math.round(((Math.max(...xs) - Math.min(...xs)) / width) * 100),
+        hPct: Math.round(((Math.max(...ys) - Math.min(...ys)) / height) * 100)
+      };
+    });
+
+    // Try composite capture (foreignObject)
+    let compositeUrl = null;
+    try {
+      const clone = content.cloneNode(true);
+      clone.querySelectorAll('.annotation-canvas, .annotation-badge').forEach(el => el.remove());
+      inlineStyles(content, clone);
+      clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+
+      const serialized = new XMLSerializer().serializeToString(clone);
+      const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+        <foreignObject width="100%" height="100%">${serialized}</foreignObject>
+      </svg>`;
+
+      const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      const img = await loadImage(url);
+      URL.revokeObjectURL(url);
+
+      const composite = document.createElement('canvas');
+      composite.width = width;
+      composite.height = height;
+      const cCtx = composite.getContext('2d');
+      cCtx.drawImage(img, 0, 0);
+      cCtx.drawImage(canvas, 0, 0);
+      compositeUrl = composite.toDataURL('image/png');
+    } catch (e) {
+      console.warn('Composite capture failed:', e);
+      compositeUrl = canvas.toDataURL('image/png');
+    }
+
+    return {
+      compositeDataUrl: compositeUrl,
+      strokeRegions,
+      mockupSize: { w: width, h: height }
+    };
+  }
+
+  function inlineStyles(source, target) {
+    try {
+      const computed = window.getComputedStyle(source);
+      for (const prop of computed) {
+        try { target.style.setProperty(prop, computed.getPropertyValue(prop)); } catch {}
+      }
+    } catch {}
+    const srcKids = source.children;
+    const tgtKids = target.children;
+    for (let i = 0; i < srcKids.length && i < tgtKids.length; i++) {
+      if (tgtKids[i].classList?.contains('annotation-canvas')) continue;
+      if (tgtKids[i].classList?.contains('annotation-badge')) continue;
+      inlineStyles(srcKids[i], tgtKids[i]);
+    }
+  }
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  // ============================================================
+  // AUDIO DEVICE ENUMERATION
+  // ============================================================
+  async function populateAudioDevices() {
+    try {
+      // Need a brief getUserMedia to get device labels
+      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tempStream.getTracks().forEach(t => t.stop());
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
+      const select = document.getElementById('audio-device');
+      select.innerHTML = '';
+      for (const device of audioInputs) {
+        const opt = document.createElement('option');
+        opt.value = device.deviceId;
+        opt.textContent = device.label || `Mic ${audioInputs.indexOf(device) + 1}`;
+        select.appendChild(opt);
+      }
+      console.log(`Found ${audioInputs.length} audio input(s):`, audioInputs.map(d => d.label));
+    } catch (e) {
+      console.warn('Could not enumerate audio devices:', e);
+    }
+  }
+
+  // ============================================================
+  // RECORDING + WAVEFORM + AUDIO LEVEL
+  // ============================================================
+  async function startRecording() {
+    try {
+      // Use selected audio device
+      const deviceId = document.getElementById('audio-device').value;
+      const constraints = deviceId
+        ? { audio: { deviceId: { exact: deviceId } } }
+        : { audio: true };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Show which device we're using
+      const track = stream.getAudioTracks()[0];
+      const deviceLabel = track.label || 'Unknown mic';
+      const labelEl = document.getElementById('audio-device-label');
+      labelEl.textContent = '🎤 ' + deviceLabel;
+      labelEl.classList.add('visible');
+      console.log('Recording with:', deviceLabel, track.getSettings());
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus' : 'audio/mp4';
+      mediaRecorder = new MediaRecorder(stream, { mimeType });
+      audioChunks = [];
+      hoverLog = [];
+      annotationLog = [];
+      currentHoveredMockup = null;
+      recordingStartTime = Date.now();
+      audioLevelZeroSince = Date.now();
+
+      // Web Audio for waveform + level metering
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      await audioCtx.resume(); // CRITICAL: browsers suspend AudioContext until user gesture
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+      console.log('AudioContext state:', audioCtx.state);
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (audioCtx) { audioCtx.close(); audioCtx = null; analyser = null; }
+
+        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+        console.log('Recording stopped:', blob.size, 'bytes,', blob.type);
+        if (blob.size < 1000) {
+          showToast('Recording too short or empty — check microphone', 'error', 4000);
+          return;
+        }
+        showToast('Transcribing audio…', null, 30000);
+        await submitTranscription(blob);
+      };
+
+      mediaRecorder.start(100);
+      isRecording = true;
+
+      document.getElementById('btn-record').classList.add('active');
+      document.getElementById('btn-record').textContent = '⏹ Stop';
+      document.getElementById('rec-group').classList.add('visible');
+      document.getElementById('audio-level').classList.add('visible');
+      document.getElementById('audio-warning').classList.remove('visible');
+
+      timerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+        document.getElementById('rec-timer').textContent =
+          `${Math.floor(elapsed / 60)}:${(elapsed % 60).toString().padStart(2, '0')}`;
+      }, 200);
+
+      drawWaveform();
+      showToast('Recording started', 'success', 1500);
+    } catch (err) {
+      console.error('Recording failed:', err);
+      showToast('Mic error: ' + (err.message || 'access denied'), 'error', 4000);
+    }
+  }
+
+  function drawWaveform() {
+    if (!isRecording || !analyser) return;
+    requestAnimationFrame(drawWaveform);
+
+    const waveCanvas = document.getElementById('waveform');
+    const wCtx = waveCanvas.getContext('2d');
+    const bufLen = analyser.frequencyBinCount;
+    const timeData = new Uint8Array(bufLen);
+    analyser.getByteTimeDomainData(timeData);
+
+    wCtx.fillStyle = '#181818';
+    wCtx.fillRect(0, 0, waveCanvas.width, waveCanvas.height);
+
+    // Center line
+    wCtx.strokeStyle = '#333';
+    wCtx.lineWidth = 0.5;
+    wCtx.beginPath();
+    wCtx.moveTo(0, waveCanvas.height / 2);
+    wCtx.lineTo(waveCanvas.width, waveCanvas.height / 2);
+    wCtx.stroke();
+
+    // Waveform
+    wCtx.strokeStyle = '#ff6b6b';
+    wCtx.lineWidth = 2;
+    wCtx.beginPath();
+    const sliceWidth = waveCanvas.width / bufLen;
+    let x = 0;
+    for (let i = 0; i < bufLen; i++) {
+      const v = timeData[i] / 128.0;
+      const y = (v * waveCanvas.height) / 2;
+      if (i === 0) wCtx.moveTo(x, y);
+      else wCtx.lineTo(x, y);
+      x += sliceWidth;
+    }
+    wCtx.stroke();
+
+    // Audio level
+    const freqData = new Uint8Array(bufLen);
+    analyser.getByteFrequencyData(freqData);
+    const avg = freqData.reduce((s, v) => s + v, 0) / freqData.length;
+    const level = Math.min(100, (avg / 100) * 100);
+
+    const fillEl = document.getElementById('audio-level-fill');
+    fillEl.style.height = level + '%';
+    fillEl.style.background = level > 10 ? '#2ecc71' : level > 3 ? '#f39c12' : '#666';
+
+    // Warn if no audio for 3+ seconds
+    if (level > 3) {
+      audioLevelZeroSince = Date.now();
+      document.getElementById('audio-warning').classList.remove('visible');
+    } else if (Date.now() - audioLevelZeroSince > 3000) {
+      document.getElementById('audio-warning').classList.add('visible');
+    }
+  }
+
+  // Returns a promise that resolves after transcription completes (if recording)
+  function stopRecording() {
+    return new Promise((resolve) => {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        resolve();
+        return;
+      }
+      // Patch onstop to resolve after transcription
+      const origOnStop = mediaRecorder.onstop;
+      mediaRecorder.onstop = async (e) => {
+        await origOnStop(e);
+        resolve();
+      };
+      mediaRecorder.stop();
+      isRecording = false;
+      clearInterval(timerInterval);
+      document.getElementById('btn-record').classList.remove('active');
+      document.getElementById('btn-record').textContent = '🎤 Record';
+      document.getElementById('rec-group').classList.remove('visible');
+      document.getElementById('audio-level').classList.remove('visible');
+      document.getElementById('audio-warning').classList.remove('visible');
+      document.getElementById('audio-device-label').classList.remove('visible');
+      getMockups().forEach(m => m.classList.remove('hovered', 'dimmed'));
+    });
+  }
+
+  async function submitTranscription(blob) {
+    const arrayBuffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let base64 = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      base64 += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    base64 = btoa(base64);
+
+    const format = blob.type.includes('webm') ? 'webm' : 'mp4';
+
+    try {
+      const resp = await fetch('/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: base64, format, hoverLog, annotationLog })
+      });
+
+      const result = await resp.json();
+      if (result.transcript) {
+        state.transcripts.push(result);
+        saveDraft();
+        showToast('Voice critique captured (' + result.duration_s + 's)', 'success', 3000);
+      } else if (result.error) {
+        showToast('Transcription error: ' + result.error, 'error', 5000);
+      }
+    } catch (err) {
+      showToast('Failed to transcribe: ' + err.message, 'error', 5000);
+    }
+  }
+
+  // ============================================================
+  // HOVER TRACKING
+  // ============================================================
+  document.addEventListener('mousemove', (e) => {
+    if (!isRecording) return;
+    const mockup = findMockupUnderPoint(e.clientX, e.clientY);
+    if (mockup) {
+      const id = mockup.dataset.mockupId;
+      if (id !== currentHoveredMockup) {
+        currentHoveredMockup = id;
+        hoverLog.push({
+          t: Date.now() - recordingStartTime,
+          mockupId: id,
+          label: mockup.querySelector('.mockup-label')?.textContent || id
+        });
+        getMockups().forEach(m => {
+          m.classList.toggle('hovered', m === mockup);
+          m.classList.toggle('dimmed', m !== mockup);
+        });
+      }
+    }
+  });
+
+  // ============================================================
+  // SUBMIT FEEDBACK
+  // ============================================================
+  async function submitFeedback() {
+    // Stop recording first and wait for transcription to finish
+    if (isRecording) {
+      showToast('Stopping recording & transcribing…', null, 15000);
+      await stopRecording();
+    }
+
+    const mockups = [];
+    for (const section of getMockups()) {
+      const id = section.dataset.mockupId;
+      const rating = state.ratings[id] || null;
+      const notes = state.notes[id] || '';
+      const hasStrokes = section._strokes && section._strokes.length > 0;
+
+      if (!rating && !notes && !hasStrokes && state.transcripts.length === 0) continue;
+
+      const entry = {
+        id,
+        label: section.querySelector('.mockup-label')?.textContent || id,
+        rating,
+        notes
+      };
+
+      if (hasStrokes) {
+        const capture = await captureAnnotation(section);
+        if (capture) {
+          entry.pendingAnnotations = [{ compositeDataUrl: capture.compositeDataUrl }];
+          entry.strokeRegions = capture.strokeRegions;
+          entry.mockupSize = capture.mockupSize;
+        }
+      }
+
+      mockups.push(entry);
+    }
+
+    if (mockups.length === 0 && state.transcripts.length === 0) {
+      showToast('No feedback to submit. Rate, annotate, or record first.', 'error', 3000);
+      return;
+    }
+
+    showToast('Submitting feedback…');
+
+    try {
+      const resp = await fetch('/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mockups, critiqueSessions: state.transcripts })
+      });
+      const result = await resp.json();
+      if (result.ok) {
+        const savedStrokes = { ...state.strokes };
+        clearDraft();
+        state.strokes = savedStrokes;
+        saveDraft();
+
+        document.querySelectorAll('.rating-buttons button').forEach(b => b.classList.remove('selected'));
+        document.querySelectorAll('.feedback-body textarea').forEach(t => { t.value = ''; });
+        updateSummary();
+        showToast(`Feedback submitted (iteration ${result.iteration})`, 'success', 4000);
+      }
+    } catch (err) {
+      showToast('Failed to submit: ' + err.message, 'error', 5000);
+    }
+  }
+
+  // ============================================================
+  // KEYBOARD SHORTCUTS
+  // ============================================================
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+    if (e.key === 'r' || e.key === 'R') {
+      isRecording ? stopRecording() : startRecording();
+    } else if (e.key === 'd' || e.key === 'D') {
+      toggleDrawMode();
+    } else if (e.key === 'z' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      undoLastStroke();
+    } else if (e.key === 'Escape') {
+      if (isRecording) stopRecording();
+      if (isDrawMode) toggleDrawMode();
+    }
+  });
+
+  // ============================================================
+  // BUTTON HANDLERS
+  // ============================================================
+  document.getElementById('btn-record').addEventListener('click', () => {
+    isRecording ? stopRecording() : startRecording();
+  });
+  document.getElementById('btn-draw').addEventListener('click', toggleDrawMode);
+  document.getElementById('btn-submit').addEventListener('click', submitFeedback);
+
+  // ============================================================
+  // SSE AUTO-RELOAD
+  // ============================================================
+  function connectSSE() {
+    const es = new EventSource('/events');
+    es.addEventListener('reload', () => { saveDraft(); location.reload(); });
+    es.onerror = () => { es.close(); setTimeout(connectSSE, 2000); };
+  }
+
+  // ============================================================
+  // INIT
+  // ============================================================
+  function init() {
+    console.log('Design Explorer init:', getMockups().length, 'mockups');
+    restoreState();
+    initCanvases();
+    updateSummary();
+    connectSSE();
+    populateAudioDevices();
+
+    // Watch for dynamically added mockup sections
+    new MutationObserver(() => {
+      initCanvases();
+      updateSummary();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
