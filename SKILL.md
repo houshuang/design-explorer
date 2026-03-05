@@ -1,12 +1,12 @@
 ---
 name: design-explorer
-description: Rapid visual design iteration with voice critique, drawing annotations, and structured feedback
+description: Generate diverse design mockups and collect structured feedback via thumbs voting and notes
 user_invocable: true
 ---
 
 # Design Explorer
 
-Launch a design exploration session with auto-reloading mockups, voice critique, drawing annotations, and structured feedback.
+Generate many diverse design mockups as HTML fragments. The server assembles them into a single feedback page with thumbs up/down voting and notes. User copies compiled feedback text to clipboard and pastes it back.
 
 ## Trigger
 
@@ -23,11 +23,11 @@ node ~/.claude/skills/design-explorer/assets/server.js --dir {working_dir}/mocku
 
 The server auto-opens the browser. It watches the mockup directory and auto-reloads when files change.
 
-### 2. Write mockup files
+### 2. Generate mockups
 
-Each mockup is a **separate HTML fragment file**: `mockup-1.html`, `mockup-2.html`, etc. The server automatically assembles them into a page using the harness template.
+Each mockup is a **separate HTML fragment file**: `mockup-1.html`, `mockup-2.html`, etc. The server assembles them into a page.
 
-A mockup file is just the `<section>` element — no `<html>`, `<head>`, or harness code:
+A mockup file is just a `<section>` element — no `<html>`, `<head>`, or harness code:
 
 ```html
 <section class="mockup-section" data-mockup-id="mockup-1">
@@ -45,61 +45,38 @@ A mockup file is just the `<section>` element — no `<html>`, `<head>`, or harn
     <button class="feedback-toggle">▸ Notes</button>
     <div class="feedback-body">
       <textarea placeholder="Notes about this design..."></textarea>
-      <div class="annotation-thumbnails"></div>
-      <div class="voice-transcripts"></div>
     </div>
   </div>
 </section>
 ```
 
-**Write mockups in parallel** — each is an independent file:
+**Write mockups in parallel** — each is an independent file. Generate 5-10+ mockups per round.
 
-```
-Write mockup-1.html  (Design A)
-Write mockup-2.html  (Design B)  — can be parallel
-Write mockup-3.html  (Design C)  — can be parallel
-```
+### Design generation principles
 
-The browser auto-reloads on each write. Files are sorted numerically (`mockup-1`, `mockup-2`, ...).
+- **Be diverse**: Don't generate 10 variations of the same idea. Explore fundamentally different approaches, layouts, color schemes, interaction models.
+- **Be innovative**: Include at least 2-3 unconventional or surprising approaches the user wouldn't have thought of.
+- **Binary search the design space**: Cover the extremes — minimal vs. maximal, dark vs. light, dense vs. spacious, playful vs. serious.
+- **Unique functionality**: Each mockup should showcase a different feature idea or interaction pattern, not just visual restyling.
+- **Self-contained**: Each mockup uses inline styles or a scoped `<style>` tag. No external dependencies.
 
-### 3. Wait for user feedback
+### 3. Wait for feedback
 
-After telling the user mockups are ready, block on the long-poll endpoint:
+Tell the user the mockups are ready and to paste their feedback when done. The user:
+1. Views all mockups in the browser
+2. Clicks 👍/👎 on each
+3. Optionally writes notes per mockup
+4. Clicks "Copy Feedback" at the bottom — this copies a text summary to clipboard
+5. Pastes the text back into the chat
 
-```bash
-curl -s http://localhost:8000/feedback/wait?since=0&timeout=120000
-```
-
-This blocks until the user clicks Submit or times out. On timeout, re-poll.
-
-Once notified, read the full feedback:
-
-```bash
-curl -s http://localhost:8000/feedback
-```
-
-### 4. Read and act on feedback
-
-The feedback JSON contains:
-- **ratings**: "up" or "down" per mockup (thumbs up/down)
-- **notes**: Free text per mockup
-- **critiqueSessions**: Voice transcripts with `[Mockup N: "Label"]` headers
-- **annotations**: PNG files + **strokeRegions** (percentage bounding boxes of what user circled)
-- Each mockup entry includes `strokeRegions: [{xPct, yPct, wPct, hPct}, ...]` so you can map annotations back to elements in the HTML you wrote
-
-### 5. Iterate
+### 4. Iterate
 
 Based on feedback:
-- **Edit** a specific mockup: just read + edit its file (e.g., `mockup-3.html`)
+- **Edit** a specific mockup: read + edit its file (e.g., `mockup-3.html`)
 - **Remove** a thumbs-down mockup: delete its file
 - **Add** new variants: write new `mockup-N.html` files
 - The browser auto-reloads on every file change
 - Go back to step 3
-
-For subsequent polls, use `since=N`:
-```bash
-curl -s http://localhost:8000/feedback/wait?since=1&timeout=120000
-```
 
 ## Key Benefits of Fragment Architecture
 
@@ -108,28 +85,3 @@ curl -s http://localhost:8000/feedback/wait?since=1&timeout=120000
 - **Delete**: Just delete the file
 - **Parallel writes**: Write 5 mockups in 5 parallel tool calls
 - **No harness duplication**: CSS/JS lives in the template, never in your output
-
-## User Controls
-
-| Control | Action |
-|---------|--------|
-| `R` / Record button | Start/stop voice critique with live waveform |
-| `D` / Draw button | Toggle draw mode — draw on mockup content areas |
-| `Ctrl+Z` | Undo last stroke |
-| `Esc` | Cancel recording or draw mode |
-| 👍 / 👎 | Thumbs up/down per mockup (click to toggle) |
-| Notes panel | Free text per mockup |
-| Audio device dropdown | Select which microphone to use |
-| Submit | Send all feedback to server |
-
-## Voice Setup
-
-Transcription uses Soniox cloud API (fast, multilingual). Ensure `SONIOX_API_KEY` or `SONIX_KEY` is set in environment, or in a `.env` file in the working directory, `~/src/petrarca/.env`, or `~/src/alignment/.env`.
-
-## Health Check
-
-```bash
-curl http://localhost:8000/health
-```
-
-Returns: transcription backend, mockup count + filenames, feedback count.
