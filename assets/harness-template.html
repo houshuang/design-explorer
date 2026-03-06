@@ -1,379 +1,774 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Design Explorer</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Design Explorer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #f5f5f5; overflow: hidden; height: 100vh; width: 100vw; color: #333;
+    }
 
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    background: #0a0a0a;
-    color: #e0e0e0;
-    min-height: 100vh;
-    padding-bottom: 120px;
-  }
+    /* ── Top bar ─────────────────────────────── */
+    #counter {
+      position: fixed; top: 16px; left: 20px; z-index: 100;
+      font-size: 14px; font-weight: 600; color: #666;
+      background: rgba(255,255,255,0.92); padding: 5px 14px; border-radius: 20px;
+      backdrop-filter: blur(8px); box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    #sessions {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 100;
+      display: flex; gap: 4px;
+    }
+    .session-pill {
+      padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px solid #ddd; background: rgba(255,255,255,0.92); cursor: pointer;
+      backdrop-filter: blur(8px); color: #888; transition: all 0.2s;
+    }
+    .session-pill.active { background: #333; color: #fff; border-color: #333; }
+    .session-pill:hover { border-color: #999; }
+    #copy-btn {
+      position: fixed; top: 16px; right: 20px; z-index: 100;
+      font-size: 15px; cursor: pointer; background: rgba(255,255,255,0.92);
+      padding: 0; width: 34px; height: 34px; border-radius: 20px; backdrop-filter: blur(8px);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: none; transition: transform 0.15s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #copy-btn:active { transform: scale(0.9); }
+    #fit-btn {
+      position: fixed; top: 16px; right: 62px; z-index: 100;
+      font-size: 13px; cursor: pointer; background: rgba(255,255,255,0.92);
+      padding: 0 14px; height: 34px; border-radius: 20px; backdrop-filter: blur(8px);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: none; transition: all 0.15s;
+      color: #888; font-weight: 500; font-family: inherit;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #fit-btn:active { transform: scale(0.9); }
+    #fit-btn.active { background: #333; color: #fff; }
 
-  /* --- Sticky Header --- */
-  .dex-header {
-    position: sticky;
-    top: 0;
-    z-index: 1000;
-    background: rgba(15, 15, 15, 0.95);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid #222;
-    padding: 10px 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
+    /* ── Carousel ────────────────────────────── */
+    #carousel {
+      display: flex; height: 100vh;
+      transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .slide {
+      min-width: 100vw; height: 100vh; display: flex; justify-content: center;
+      overflow-y: auto; padding: 56px 32px 210px;
+    }
+    body.fit-mode .slide {
+      overflow: hidden; align-items: flex-start; padding-top: 48px; padding-bottom: 0;
+    }
+    .slide-inner {
+      max-width: 900px; width: 100%; background: #fff; border-radius: 12px;
+      box-shadow: 0 2px 24px rgba(0,0,0,0.06); padding: 32px; position: relative;
+      border-top: 4px solid transparent; transition: border-color 0.25s, transform 0.25s;
+      height: fit-content; transform-origin: top center;
+    }
+    .slide-inner.liked { border-top-color: #22c55e; }
+    .slide-inner.disliked { border-top-color: #ef4444; }
+    .slide-label {
+      font-size: 13px; font-weight: 600; color: #999; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 16px; padding-bottom: 12px;
+      border-bottom: 1px solid #eee;
+    }
 
-  .dex-header h1 {
-    font-size: 16px;
-    font-weight: 600;
-    color: #aaa;
-    margin-right: auto;
-  }
+    /* ── Bottom bar ──────────────────────────── */
+    #bottom-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(255,255,255,0.94); backdrop-filter: blur(12px);
+      border-top: 1px solid rgba(0,0,0,0.06); padding: 10px 24px 12px;
+    }
+    #bottom-inner {
+      max-width: 900px; margin: 0 auto;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .vote-btn {
+      width: 32px; height: 32px; border-radius: 8px; border: 1.5px solid #e8e8e8;
+      background: white; font-size: 15px; cursor: pointer; transition: all 0.15s;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .vote-btn:hover { border-color: #ccc; background: #fafafa; }
+    .vote-btn.active-up { border-color: #22c55e; background: #f0fdf4; }
+    .vote-btn.active-down { border-color: #ef4444; background: #fef2f2; }
 
-  .dex-summary { font-size: 13px; color: #666; }
+    #notes {
+      flex: 1; min-width: 0; resize: none; border: 1px solid #e0e0e0; border-radius: 8px;
+      padding: 7px 12px; font-size: 14px; font-family: inherit;
+      height: 34px; max-height: 100px; line-height: 1.4;
+      background: white; color: #333; outline: none; transition: border-color 0.2s;
+    }
+    #notes:focus { border-color: #666; }
+    #notes::placeholder { color: #bbb; }
+    #notes.streaming { border-color: #ef4444; background: #fef8f8; }
 
-  /* --- Mockup Sections --- */
-  .mockup-section {
-    margin: 24px 20px;
-    border: 2px solid #1a1a1a;
-    border-radius: 12px;
-    overflow: hidden;
-  }
+    #mic-btn {
+      width: 32px; height: 32px; border-radius: 8px; border: 1.5px solid #e8e8e8;
+      background: white; font-size: 14px; cursor: default; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s; position: relative;
+    }
+    #mic-btn.recording { border-color: #ef4444; background: #fef2f2; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    #mic-btn.recording { animation: pulse 1.2s ease-in-out infinite; }
 
-  .mockup-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: #111;
-    border-bottom: 1px solid #1a1a1a;
-  }
+    #waveform {
+      position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%);
+      width: 200px; height: 40px; border-radius: 10px;
+      background: rgba(255,255,255,0.95); backdrop-filter: blur(8px);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08); border: 1px solid rgba(0,0,0,0.06);
+      opacity: 0; transition: opacity 0.2s; z-index: 101;
+    }
+    #waveform.active { opacity: 1; }
 
-  .mockup-label {
-    font-size: 15px;
-    font-weight: 600;
-    color: #ccc;
-    flex: 1;
-  }
+    /* ── Help overlay ────────────────────────── */
+    #help-btn {
+      position: fixed; bottom: 60px; right: 20px; z-index: 100;
+      width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid #ddd;
+      background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+      font-size: 13px; color: #aaa; cursor: pointer; display: flex;
+      align-items: center; justify-content: center; font-weight: 600;
+      transition: all 0.15s;
+    }
+    #help-btn:hover { border-color: #999; color: #666; }
+    #shortcuts-overlay {
+      position: fixed; bottom: 96px; right: 20px; z-index: 200;
+      background: rgba(30,30,30,0.92); backdrop-filter: blur(12px);
+      border-radius: 12px; padding: 16px 20px;
+      display: none; min-width: 200px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
+    #shortcuts-overlay.visible { display: block; }
+    .sc-row { display: flex; justify-content: space-between; gap: 24px; padding: 4px 0; }
+    .sc-key { font-size: 12px; color: #999; }
+    .sc-key kbd {
+      display: inline-block; background: rgba(255,255,255,0.12); padding: 1px 6px;
+      border-radius: 4px; font-family: inherit; font-size: 11px; color: #ccc;
+      border: 1px solid rgba(255,255,255,0.08); min-width: 20px; text-align: center;
+    }
+    .sc-label { font-size: 12px; color: #888; }
 
-  .rating-buttons { display: flex; gap: 6px; }
-  .rating-buttons button {
-    width: 36px; height: 32px;
-    border: 1px solid #333;
-    border-radius: 6px;
-    background: #1a1a1a;
-    color: #666;
-    font-size: 18px;
-    cursor: pointer;
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .rating-buttons button:hover { background: #252525; }
-  .rating-buttons button[data-rating="down"].selected {
-    background: #3a1515; border-color: #e74c3c; color: #ff6b6b;
-  }
-  .rating-buttons button[data-rating="up"].selected {
-    background: #153a15; border-color: #2ecc71; color: #2ecc71;
-  }
-
-  .mockup-content {
-    background: #fff;
-    color: #000;
-  }
-
-  .feedback-panel {
-    border-top: 1px solid #1a1a1a;
-    background: #0d0d0d;
-  }
-  .feedback-toggle {
-    width: 100%; padding: 8px 16px;
-    background: none; border: none;
-    color: #555; font-size: 12px;
-    cursor: pointer; text-align: left;
-  }
-  .feedback-toggle:hover { color: #888; }
-  .feedback-body { display: none; padding: 12px 16px; }
-  .feedback-body.open { display: block; }
-  .feedback-body textarea {
-    width: 100%; min-height: 60px; padding: 8px 10px;
-    background: #111; border: 1px solid #222; border-radius: 6px;
-    color: #ccc; font-size: 13px; resize: vertical; font-family: inherit;
-  }
-  .feedback-body textarea:focus { outline: none; border-color: #4a9eff; }
-
-  /* --- Feedback Summary + Copy --- */
-  .dex-feedback-summary {
-    margin: 32px 20px;
-    background: #111;
-    border: 1px solid #222;
-    border-radius: 12px;
-    overflow: hidden;
-  }
-  .dex-feedback-summary h2 {
-    padding: 12px 16px;
-    font-size: 14px;
-    color: #888;
-    background: #0d0d0d;
-    border-bottom: 1px solid #222;
-  }
-  .dex-feedback-text {
-    padding: 16px;
-    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-    font-size: 12px;
-    color: #999;
-    white-space: pre-wrap;
-    line-height: 1.5;
-    max-height: 400px;
-    overflow-y: auto;
-  }
-  .dex-copy-btn {
-    display: block;
-    width: calc(100% - 40px);
-    margin: 0 20px 40px;
-    padding: 14px;
-    border: 2px solid #2ecc71;
-    border-radius: 10px;
-    background: #0d1f14;
-    color: #2ecc71;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-    text-align: center;
-  }
-  .dex-copy-btn:hover { background: #152a1a; }
-  .dex-copy-btn.copied { border-color: #666; color: #666; background: #111; }
-
-  /* --- Toast --- */
-  .dex-toast {
-    position: fixed;
-    bottom: 60px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(20, 20, 20, 0.95);
-    border: 1px solid #2ecc71;
-    border-radius: 8px;
-    padding: 10px 20px;
-    font-size: 13px;
-    color: #2ecc71;
-    z-index: 2000;
-    opacity: 0;
-    transition: opacity 0.3s;
-    pointer-events: none;
-  }
-  .dex-toast.visible { opacity: 1; }
-</style>
+    /* ── Empty state ─────────────────────────── */
+    #empty-state {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      text-align: center; color: #bbb;
+    }
+    #empty-state h2 { font-weight: 400; font-size: 20px; margin-bottom: 6px; }
+    #empty-state p { font-size: 14px; }
+  </style>
 </head>
 <body>
+  <div id="counter"></div>
+  <div id="sessions"></div>
+  <button id="fit-btn" title="Fit to window (F)">Fit</button>
+  <button id="copy-btn" title="Copy feedback (C)">📋</button>
 
-<div class="dex-header">
-  <h1>Design Explorer</h1>
-  <div class="dex-summary" id="summary">0 mockups</div>
-</div>
+  <div id="carousel"></div>
 
-<!-- === MOCKUP SECTIONS GO HERE === -->
+  <div id="empty-state">
+    <h2>Waiting for mockups…</h2>
+    <p>HTML files in the mockup directory will appear here</p>
+  </div>
 
-<div class="dex-feedback-summary" id="feedback-summary">
-  <h2>Compiled Feedback</h2>
-  <div class="dex-feedback-text" id="feedback-text">Vote or write notes above to see feedback here.</div>
-</div>
+  <div id="bottom-bar" style="display:none">
+    <div id="bottom-inner">
+      <button class="vote-btn" id="btn-up" title="Like (↑)">👍</button>
+      <button class="vote-btn" id="btn-down" title="Dislike (↓)">👎</button>
+      <textarea id="notes" placeholder="Notes… (Tab to focus)" rows="1"></textarea>
+      <div id="mic-btn" title="Hold Space to record">🎤</div>
+    </div>
+    <canvas id="waveform" width="200" height="40"></canvas>
+  </div>
 
-<button class="dex-copy-btn" id="copy-btn">📋 Copy Feedback to Clipboard</button>
+  <div id="help-btn" title="Keyboard shortcuts (?)">?</div>
+  <div id="shortcuts-overlay">
+    <div class="sc-row"><span class="sc-key"><kbd>←</kbd> <kbd>→</kbd></span><span class="sc-label">Navigate</span></div>
+    <div class="sc-row"><span class="sc-key"><kbd>↑</kbd> <kbd>↓</kbd></span><span class="sc-label">Like / Dislike</span></div>
+    <div class="sc-row sc-voice"><span class="sc-key">Hold <kbd>Space</kbd></span><span class="sc-label">Voice note</span></div>
+    <div class="sc-row"><span class="sc-key"><kbd>Tab</kbd></span><span class="sc-label">Focus notes</span></div>
+    <div class="sc-row"><span class="sc-key"><kbd>F</kbd></span><span class="sc-label">Fit to window</span></div>
+    <div class="sc-row"><span class="sc-key"><kbd>C</kbd></span><span class="sc-label">Copy feedback</span></div>
+    <div class="sc-row"><span class="sc-key"><kbd>?</kbd></span><span class="sc-label">This help</span></div>
+  </div>
 
-<div class="dex-toast" id="toast">Copied!</div>
+  <script>
+    /*__SONIOX_KEY_INJECT__*/
 
-<script>
-(function() {
-  'use strict';
+    // ── State ────────────────────────────────────
+    const mockups = [];     // [{id, label, contentHtml, session, vote, notes, voiceNotes}]
+    let currentIndex = 0;   // index into visible mockups
+    let currentSession = null;
+    let notesActive = false;
+    let recording = false;
 
-  const STORAGE_KEY = 'dex-draft';
-  let state = loadDraft();
+    // ── DOM refs ─────────────────────────────────
+    const $ = (s) => document.getElementById(s);
+    const carousel    = $('carousel');
+    const counterEl   = $('counter');
+    const sessionsEl  = $('sessions');
+    const emptyState  = $('empty-state');
+    const bottomBar   = $('bottom-bar');
+    const notesEl     = $('notes');
+    const btnUp       = $('btn-up');
+    const btnDown     = $('btn-down');
+    const waveform    = $('waveform');
+    const micBtn      = $('mic-btn');
+    const copyBtn     = $('copy-btn');
+    const helpBtn     = $('help-btn');
+    const helpOverlay = $('shortcuts-overlay');
 
-  function loadDraft() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : { ratings: {}, notes: {} };
-    } catch { return { ratings: {}, notes: {} }; }
-  }
-  function saveDraft() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
-
-  function getMockups() { return Array.from(document.querySelectorAll('.mockup-section')); }
-
-  // --- Rating + Notes (event delegation) ---
-  document.addEventListener('click', (e) => {
-    const ratingBtn = e.target.closest('.rating-buttons button[data-rating]');
-    if (ratingBtn) {
-      const section = ratingBtn.closest('.mockup-section');
-      if (!section) return;
-      const id = section.dataset.mockupId;
-      const rating = ratingBtn.dataset.rating;
-
-      if (state.ratings[id] === rating) {
-        delete state.ratings[id];
-        ratingBtn.classList.remove('selected');
-      } else {
-        state.ratings[id] = rating;
-        section.querySelectorAll('.rating-buttons button').forEach(b => b.classList.remove('selected'));
-        ratingBtn.classList.add('selected');
-      }
-      saveDraft();
-      updateFeedback();
-      return;
+    // ── Helpers ──────────────────────────────────
+    function visible() {
+      if (currentSession === null) return mockups;
+      return mockups.filter(m => m.session === currentSession);
     }
 
-    const toggle = e.target.closest('.feedback-toggle');
-    if (toggle) {
-      const body = toggle.nextElementSibling;
-      if (body) {
-        body.classList.toggle('open');
-        toggle.textContent = body.classList.contains('open') ? '▾ Notes' : '▸ Notes';
-      }
-      return;
-    }
-  });
-
-  document.addEventListener('input', (e) => {
-    if (e.target.matches('.feedback-body textarea')) {
-      const section = e.target.closest('.mockup-section');
-      if (section) {
-        state.notes[section.dataset.mockupId] = e.target.value;
-        saveDraft();
-        updateFeedback();
-      }
-    }
-  });
-
-  // --- Compile feedback text ---
-  function compileFeedback() {
-    const mockups = getMockups();
-    if (mockups.length === 0) return 'No mockups loaded.';
-
-    const lines = [];
-    const ups = [];
-    const downs = [];
-    const unrated = [];
-
-    for (const section of mockups) {
-      const id = section.dataset.mockupId;
-      const label = section.querySelector('.mockup-label')?.textContent || id;
-      const rating = state.ratings[id];
-      const notes = (state.notes[id] || '').trim();
-
-      if (rating === 'up') ups.push({ label, notes });
-      else if (rating === 'down') downs.push({ label, notes });
-      else unrated.push({ label, notes });
+    function visibleIndices() {
+      const v = visible();
+      return v.map(m => mockups.indexOf(m));
     }
 
-    if (ups.length) {
-      lines.push('LIKED (👍):');
-      for (const m of ups) {
-        lines.push(`  - ${m.label}${m.notes ? ': ' + m.notes : ''}`);
-      }
-      lines.push('');
+    function currentMockup() {
+      return visible()[currentIndex] || null;
     }
 
-    if (downs.length) {
-      lines.push('DISLIKED (👎):');
-      for (const m of downs) {
-        lines.push(`  - ${m.label}${m.notes ? ': ' + m.notes : ''}`);
-      }
-      lines.push('');
+    // ── Carousel navigation ──────────────────────
+    function goTo(idx) {
+      const vi = visibleIndices();
+      if (vi.length === 0) return;
+      idx = Math.max(0, Math.min(idx, vi.length - 1));
+      currentIndex = idx;
+      carousel.style.transform = `translateX(-${vi[idx] * 100}vw)`;
+      updateUI();
     }
 
-    if (unrated.length) {
-      const withNotes = unrated.filter(m => m.notes);
-      const without = unrated.filter(m => !m.notes);
-      if (withNotes.length) {
-        lines.push('UNRATED (with notes):');
-        for (const m of withNotes) {
-          lines.push(`  - ${m.label}: ${m.notes}`);
-        }
-        lines.push('');
-      }
-      if (without.length) {
-        lines.push(`UNRATED: ${without.map(m => m.label).join(', ')}`);
-        lines.push('');
-      }
+    function navigate(dir) { goTo(currentIndex + dir); }
+
+    function addSlide(mockup) {
+      const slide = document.createElement('div');
+      slide.className = 'slide';
+      slide.dataset.id = mockup.id;
+
+      const inner = document.createElement('div');
+      inner.className = 'slide-inner';
+
+      const label = document.createElement('div');
+      label.className = 'slide-label';
+      label.textContent = mockup.label;
+
+      const content = document.createElement('div');
+      content.className = 'slide-content';
+      content.innerHTML = mockup.contentHtml;
+
+      inner.appendChild(label);
+      inner.appendChild(content);
+      slide.appendChild(inner);
+      carousel.appendChild(slide);
     }
 
-    lines.push(`Total: ${ups.length} 👍, ${downs.length} 👎, ${unrated.length} unrated out of ${mockups.length}`);
-    return lines.join('\n');
-  }
+    // ── UI update ────────────────────────────────
+    function updateUI() {
+      const vis = visible();
+      const hasSlides = vis.length > 0;
 
-  function updateFeedback() {
-    const text = compileFeedback();
-    document.getElementById('feedback-text').textContent = text;
-    updateSummary();
-  }
+      emptyState.style.display = hasSlides ? 'none' : 'block';
+      bottomBar.style.display = hasSlides ? 'block' : 'none';
+      counterEl.textContent = hasSlides ? `${currentIndex + 1} / ${vis.length}` : '';
 
-  function updateSummary() {
-    const total = getMockups().length;
-    const ups = Object.values(state.ratings).filter(r => r === 'up').length;
-    const downs = Object.values(state.ratings).filter(r => r === 'down').length;
-    const rated = ups + downs;
-    document.getElementById('summary').textContent =
-      `${total} mockups` + (rated ? ` · ${ups} 👍 ${downs} 👎` : '');
-  }
+      const m = currentMockup();
+      if (!m) return;
 
-  // --- Copy to clipboard ---
-  document.getElementById('copy-btn').addEventListener('click', () => {
-    const text = compileFeedback();
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = document.getElementById('copy-btn');
-      btn.textContent = '✓ Copied!';
-      btn.classList.add('copied');
-      const toast = document.getElementById('toast');
-      toast.classList.add('visible');
-      setTimeout(() => toast.classList.remove('visible'), 2000);
-      setTimeout(() => { btn.textContent = '📋 Copy Feedback to Clipboard'; btn.classList.remove('copied'); }, 3000);
+      // Vote buttons
+      btnUp.className = 'vote-btn' + (m.vote === 'up' ? ' active-up' : '');
+      btnDown.className = 'vote-btn' + (m.vote === 'down' ? ' active-down' : '');
+
+      // Notes
+      if (!recording) {
+        notesEl.value = m.notes || '';
+        autoResize();
+      }
+
+      // Slide border states
+      const slides = carousel.querySelectorAll('.slide');
+      mockups.forEach((mk, i) => {
+        if (!slides[i]) return;
+        const inner = slides[i].querySelector('.slide-inner');
+        inner.classList.toggle('liked', mk.vote === 'up');
+        inner.classList.toggle('disliked', mk.vote === 'down');
+      });
+
+      if (fitMode) applyFitScale();
+    }
+
+    // ── Voting ───────────────────────────────────
+    function vote(dir) {
+      const m = currentMockup();
+      if (!m) return;
+      m.vote = m.vote === dir ? null : dir;
+      updateUI();
+    }
+
+    btnUp.onclick = () => vote('up');
+    btnDown.onclick = () => vote('down');
+
+    // ── Notes ────────────────────────────────────
+    function autoResize() {
+      notesEl.style.height = 'auto';
+      notesEl.style.height = Math.min(notesEl.scrollHeight, 100) + 'px';
+    }
+
+    notesEl.addEventListener('input', () => {
+      const m = currentMockup();
+      if (m) m.notes = notesEl.value;
+      autoResize();
     });
-  });
+    notesEl.addEventListener('focus', () => { notesActive = true; });
+    notesEl.addEventListener('blur', () => { notesActive = false; });
 
-  // --- Restore state ---
-  function restoreState() {
-    for (const section of getMockups()) {
-      const id = section.dataset.mockupId;
-      if (state.ratings[id]) {
-        const btn = section.querySelector(`.rating-buttons button[data-rating="${state.ratings[id]}"]`);
-        if (btn) btn.classList.add('selected');
+    // ── Keyboard ─────────────────────────────────
+    document.addEventListener('keydown', (e) => {
+      if (notesActive && e.key !== 'Escape') return;
+
+      switch (e.key) {
+        case 'ArrowLeft':  e.preventDefault(); navigate(-1); break;
+        case 'ArrowRight': e.preventDefault(); navigate(1); break;
+        case 'ArrowUp':    e.preventDefault(); vote('up'); break;
+        case 'ArrowDown':  e.preventDefault(); vote('down'); break;
+        case ' ':
+          e.preventDefault();
+          if (!recording) startRecording();
+          break;
+        case 'Tab':
+          e.preventDefault();
+          notesEl.focus();
+          break;
+        case 'Escape':
+          e.preventDefault();
+          notesEl.blur();
+          break;
+        case 'f': case 'F':
+          if (!notesActive) { e.preventDefault(); toggleFit(); }
+          break;
+        case 'c': case 'C':
+          if (!notesActive) { e.preventDefault(); copyFeedback(); }
+          break;
+        case '?':
+          if (!notesActive) { e.preventDefault(); toggleHelp(); }
+          break;
       }
-      if (state.notes[id]) {
-        const textarea = section.querySelector('.feedback-body textarea');
-        if (textarea) textarea.value = state.notes[id];
+    });
+
+    function toggleHelp() {
+      helpOverlay.classList.toggle('visible');
+    }
+    helpBtn.onclick = toggleHelp;
+    document.addEventListener('click', (e) => {
+      if (!helpBtn.contains(e.target) && !helpOverlay.contains(e.target)) {
+        helpOverlay.classList.remove('visible');
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if (e.key === ' ' && recording) {
+        e.preventDefault();
+        stopRecording();
+      }
+    });
+
+    // ── Fit mode ──────────────────────────────────
+    const fitBtn = $('fit-btn');
+    let fitMode = false;
+
+    function toggleFit() {
+      fitMode = !fitMode;
+      document.body.classList.toggle('fit-mode', fitMode);
+      fitBtn.classList.toggle('active', fitMode);
+      fitBtn.textContent = fitMode ? 'Fit ✓' : 'Fit';
+      // Reset scroll positions
+      carousel.querySelectorAll('.slide').forEach(s => s.scrollTop = 0);
+      applyFitScale();
+    }
+
+    function applyFitScale() {
+      const slides = carousel.querySelectorAll('.slide');
+      slides.forEach(slide => {
+        const inner = slide.querySelector('.slide-inner');
+        if (!inner) return;
+        if (!fitMode) { inner.style.transform = ''; return; }
+        // offsetHeight/offsetWidth give layout size unaffected by CSS transforms —
+        // no need to reset transform (which caused a flash during carousel transitions)
+        const naturalH = inner.offsetHeight;
+        const naturalW = inner.offsetWidth;
+        const availH = window.innerHeight - 48 - 120;
+        const availW = window.innerWidth - 64;
+        const scaleH = naturalH > availH ? availH / naturalH : 1;
+        const scaleW = naturalW > availW ? availW / naturalW : 1;
+        const scale = Math.min(scaleH, scaleW);
+        inner.style.transform = scale < 0.98 ? `scale(${scale})` : '';
+      });
+    }
+
+    fitBtn.onclick = toggleFit;
+    window.addEventListener('resize', () => { if (fitMode) applyFitScale(); });
+
+    // ── Copy feedback ────────────────────────────
+    function copyFeedback() {
+      const sections = [];
+      for (const m of mockups) {
+        const vote = m.vote === 'up' ? '👍' : m.vote === 'down' ? '👎' : '—';
+        const hasNotes = m.notes && m.notes.trim();
+        if (!hasNotes && !m.vote) continue; // skip entirely untouched mockups
+        let section = `### ${m.label}  [${vote}]`;
+        if (hasNotes) section += '\n' + m.notes.trim();
+        sections.push(section);
+      }
+      // Append untouched ones as a compact list
+      const untouched = mockups.filter(m => !m.vote && !(m.notes && m.notes.trim()));
+      if (untouched.length) {
+        sections.push('### No feedback\n' + untouched.map(m => '- ' + m.label).join('\n'));
+      }
+      const text = sections.join('\n\n');
+      navigator.clipboard.writeText(text.trim()).then(() => {
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+      });
+    }
+
+    copyBtn.onclick = copyFeedback;
+
+    function flash(msg) {
+      micBtn.title = msg;
+      micBtn.style.borderColor = '#c4763c';
+      setTimeout(() => { micBtn.style.borderColor = ''; updateVoiceStatus(); }, 2000);
+    }
+
+    const voiceEnabled = !!window.__SONIOX_KEY;
+
+    function updateVoiceStatus() {
+      if (!voiceEnabled) {
+        micBtn.style.display = 'none';
+        return;
+      }
+      if (!audioReady) micBtn.title = 'Mic unavailable';
+      else if (!sonioxWs || sonioxWs.readyState !== WebSocket.OPEN) micBtn.title = 'Voice connecting…';
+      else micBtn.title = 'Hold Space to record';
+    }
+
+    // ── Audio / Soniox voice ─────────────────────
+    let audioCtx, analyser, mediaStream, sourceNode, scriptNode, sonioxWs;
+    let audioReady = false;
+    let transcript = { final: '', nonfinal: '' };
+    let preRecordingNotes = '';
+    let keepaliveTimer;
+    let barHeights = new Float32Array(24);
+
+    async function initAudio() {
+      if (!voiceEnabled) return;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioCtx = new AudioContext();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        audioReady = true;
+      } catch (err) {
+        console.error('Mic init failed:', err);
       }
     }
-  }
 
-  // --- SSE auto-reload ---
-  function connectSSE() {
-    const es = new EventSource('/events');
-    es.addEventListener('reload', () => { saveDraft(); location.reload(); });
-    es.onerror = () => { es.close(); setTimeout(connectSSE, 2000); };
-  }
+    function connectSoniox() {
+      if (!voiceEnabled) return;
 
-  // --- Init ---
-  function init() {
-    restoreState();
-    updateFeedback();
-    connectSSE();
-  }
+      sonioxWs = new WebSocket('wss://stt-rt.soniox.com/transcribe-websocket');
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-})();
-</script>
+      sonioxWs.onopen = () => {
+        sonioxWs.send(JSON.stringify({
+          api_key: window.__SONIOX_KEY,
+          model: 'stt-rt-preview',
+          audio_format: 'pcm_s16le',
+          sample_rate: 16000,
+          num_channels: 1,
+          language_hints: ['en'],
+        }));
+        keepaliveTimer = setInterval(() => {
+          if (sonioxWs.readyState === WebSocket.OPEN && !recording) {
+            sonioxWs.send(new Int16Array(160).buffer);
+          }
+        }, 10000);
+        updateVoiceStatus();
+      };
+
+      sonioxWs.onmessage = (e) => {
+        try { handleSonioxMsg(JSON.parse(e.data)); }
+        catch (err) { console.warn('Soniox parse:', err, e.data); }
+      };
+
+      sonioxWs.onerror = (err) => console.error('Soniox error:', err);
+      sonioxWs.onclose = () => {
+        clearInterval(keepaliveTimer);
+        updateVoiceStatus();
+        setTimeout(connectSoniox, 3000);
+      };
+    }
+
+    function cleanToken(text) {
+      return text.replace(/<\/?fin>/gi, '').replace(/<[^>]*>/g, '');
+    }
+
+    function handleSonioxMsg(data) {
+      if (data.finished) return;
+      if (data.tokens) {
+        let nft = '';
+        for (const tok of data.tokens) {
+          const text = cleanToken(tok.text);
+          if (!text) continue;
+          if (tok.is_final) transcript.final += text;
+          else nft += text;
+        }
+        transcript.nonfinal = nft;
+      }
+      streamToTextarea();
+    }
+
+    function streamToTextarea() {
+      const m = currentMockup();
+      if (!m || !recording) return;
+      const streamed = (transcript.final + transcript.nonfinal).trim();
+      m.notes = preRecordingNotes + (preRecordingNotes && streamed ? '\n' : '') + streamed;
+      notesEl.value = m.notes;
+      autoResize();
+      notesEl.scrollTop = notesEl.scrollHeight;
+    }
+
+    function startRecording() {
+      if (!audioReady) { flash('Mic not available — allow mic access and reload'); return; }
+      if (!sonioxWs || sonioxWs.readyState !== WebSocket.OPEN) { flash('Voice connecting…'); return; }
+      recording = true;
+      transcript = { final: '', nonfinal: '' };
+      barHeights.fill(0);
+      const m = currentMockup();
+      preRecordingNotes = m ? (m.notes || '').trimEnd() : '';
+
+      micBtn.classList.add('recording');
+      waveform.classList.add('active');
+      notesEl.classList.add('streaming');
+
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+
+      sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+      scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+
+      const nativeSR = audioCtx.sampleRate;
+      scriptNode.onaudioprocess = (e) => {
+        if (!recording) return;
+        e.outputBuffer.getChannelData(0).fill(0);
+        const input = e.inputBuffer.getChannelData(0);
+        const pcm16 = downsample(input, nativeSR, 16000);
+        if (sonioxWs.readyState === WebSocket.OPEN) {
+          sonioxWs.send(pcm16.buffer);
+        }
+      };
+
+      sourceNode.connect(analyser);
+      sourceNode.connect(scriptNode);
+      scriptNode.connect(audioCtx.destination);
+
+      drawWaveform();
+    }
+
+    function stopRecording() {
+      recording = false;
+      micBtn.classList.remove('recording');
+      waveform.classList.remove('active');
+      notesEl.classList.remove('streaming');
+
+      if (scriptNode) { scriptNode.disconnect(); scriptNode = null; }
+      if (sourceNode) { sourceNode.disconnect(); sourceNode = null; }
+
+      if (sonioxWs && sonioxWs.readyState === WebSocket.OPEN) {
+        sonioxWs.send(JSON.stringify({ type: 'finalize' }));
+      }
+
+      // Wait for final tokens, then commit
+      setTimeout(() => {
+        const text = (transcript.final + transcript.nonfinal).trim();
+        const m = currentMockup();
+        if (m) {
+          m.notes = preRecordingNotes + (preRecordingNotes && text ? '\n' : '') + text;
+          notesEl.value = m.notes;
+          autoResize();
+        }
+      }, 600);
+    }
+
+    function downsample(input, fromRate, toRate) {
+      const ratio = fromRate / toRate;
+      const len = Math.floor(input.length / ratio);
+      const out = new Int16Array(len);
+      for (let i = 0; i < len; i++) {
+        const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]));
+        out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      return out;
+    }
+
+    // ── Waveform visualization (frequency bars) ────
+    function drawWaveform() {
+      if (!recording) return;
+      const ctx = waveform.getContext('2d');
+      const W = 140, H = 36;
+      const freqData = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(freqData);
+
+      ctx.clearRect(0, 0, W, H);
+
+      const count = barHeights.length;
+      const barW = 3, gap = (W - count * barW) / (count - 1);
+      const binsPer = Math.floor(freqData.length / count);
+
+      for (let i = 0; i < count; i++) {
+        // Average frequency bins for this bar
+        let sum = 0;
+        for (let j = 0; j < binsPer; j++) sum += freqData[i * binsPer + j];
+        const target = (sum / binsPer / 255) * H * 0.9;
+        // Smooth: fast rise, slow fall
+        barHeights[i] = target > barHeights[i]
+          ? barHeights[i] * 0.3 + target * 0.7
+          : barHeights[i] * 0.85 + target * 0.15;
+        const bh = Math.max(2, barHeights[i]);
+        const x = i * (barW + gap);
+        const y = (H - bh) / 2;
+        ctx.fillStyle = `rgba(239, 68, 68, ${0.4 + (bh / H) * 0.6})`;
+        ctx.beginPath();
+        ctx.roundRect(x, y, barW, bh, 1.5);
+        ctx.fill();
+      }
+      requestAnimationFrame(drawWaveform);
+    }
+
+    // ── SSE client ───────────────────────────────
+    function connectSSE() {
+      const es = new EventSource('/events');
+
+      es.addEventListener('add', (e) => addMockup(JSON.parse(e.data)));
+      es.addEventListener('update', (e) => updateMockupContent(JSON.parse(e.data)));
+      es.addEventListener('remove', (e) => removeMockup(JSON.parse(e.data).id));
+
+      es.onerror = () => { es.close(); setTimeout(connectSSE, 2000); };
+    }
+
+    function parseMockupHtml(html) {
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      const section = div.querySelector('.mockup-section') || div.querySelector('section');
+      if (section) {
+        const id = section.dataset.mockupId || '';
+        const labelEl = section.querySelector('.mockup-label');
+        const label = labelEl ? labelEl.textContent.trim() : id;
+        const content = section.querySelector('.mockup-content');
+        return { id, label, contentHtml: content ? content.innerHTML : section.innerHTML };
+      }
+      return { id: '', label: '', contentHtml: html };
+    }
+
+    function addMockup(data) {
+      if (mockups.find(m => m.id === data.id)) {
+        updateMockupContent(data);
+        return;
+      }
+
+      const parsed = parseMockupHtml(data.html);
+      const mockup = {
+        id: data.id,
+        label: parsed.label || data.id,
+        contentHtml: parsed.contentHtml,
+        session: data.session || 0,
+        vote: null,
+        notes: '',
+      };
+
+      mockups.push(mockup);
+      addSlide(mockup);
+
+      if (mockups.length === 1) goTo(0);
+      else updateUI();
+      updateSessionPills();
+    }
+
+    function updateMockupContent(data) {
+      const idx = mockups.findIndex(m => m.id === data.id);
+      if (idx < 0) return;
+      const parsed = parseMockupHtml(data.html);
+      mockups[idx].contentHtml = parsed.contentHtml;
+      mockups[idx].label = parsed.label || mockups[idx].label;
+
+      const slides = carousel.querySelectorAll('.slide');
+      if (slides[idx]) {
+        const content = slides[idx].querySelector('.slide-content');
+        const label = slides[idx].querySelector('.slide-label');
+        if (content) content.innerHTML = parsed.contentHtml;
+        if (label) label.textContent = mockups[idx].label;
+      }
+      updateUI();
+    }
+
+    function removeMockup(id) {
+      const idx = mockups.findIndex(m => m.id === id);
+      if (idx < 0) return;
+      mockups.splice(idx, 1);
+      const slides = carousel.querySelectorAll('.slide');
+      if (slides[idx]) slides[idx].remove();
+
+      if (currentIndex >= visible().length) {
+        currentIndex = Math.max(0, visible().length - 1);
+      }
+      goTo(currentIndex);
+      updateSessionPills();
+    }
+
+    // ── Sessions ─────────────────────────────────
+    function updateSessionPills() {
+      const sessionIds = [...new Set(mockups.map(m => m.session).filter(Boolean))].sort((a,b) => a-b);
+      if (sessionIds.length <= 1) {
+        sessionsEl.innerHTML = '';
+        currentSession = null;
+        return;
+      }
+
+      sessionsEl.innerHTML = '';
+
+      const allPill = document.createElement('button');
+      allPill.className = 'session-pill' + (currentSession === null ? ' active' : '');
+      allPill.textContent = 'All';
+      allPill.onclick = () => { currentSession = null; currentIndex = 0; goTo(0); updateSessionPills(); };
+      sessionsEl.appendChild(allPill);
+
+      for (const s of sessionIds) {
+        const pill = document.createElement('button');
+        pill.className = 'session-pill' + (currentSession === s ? ' active' : '');
+        pill.textContent = `Round ${s}`;
+        pill.onclick = () => {
+          currentSession = currentSession === s ? null : s;
+          currentIndex = 0;
+          goTo(0);
+          updateSessionPills();
+        };
+        sessionsEl.appendChild(pill);
+      }
+    }
+
+    // ── Init ─────────────────────────────────────
+    (async () => {
+      connectSSE();
+      updateVoiceStatus();
+      if (voiceEnabled) {
+        notesEl.placeholder = 'Notes… (Tab to focus, Space to dictate)';
+        await initAudio();
+        connectSoniox();
+      } else {
+        document.querySelector('.sc-voice')?.remove();
+      }
+    })();
+  </script>
 </body>
 </html>
