@@ -19,7 +19,7 @@ User says: `/design-explorer [description]` or "explore designs for [thing]"
 Before generating mockups, check for design context in the project:
 - Read any `DESIGN_GUIDE.md`, design tokens, or existing mockups in the project
 - Check `CLAUDE.md` for design system references
-- If the project has an established visual language, the mockups MUST use it (don't invent a new one)
+- If the project has an established visual language, use it by default — unless the user explicitly asks to explore alternative designs. In that case, still read the existing design as a baseline to riff from, but feel free to diverge.
 - If no design system exists, explore freely across the full aesthetic spectrum
 
 ### 1. Start the server (background)
