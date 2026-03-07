@@ -14,12 +14,25 @@ User says: `/design-explorer [description]` or "explore designs for [thing]"
 
 ## Workflow
 
+### 0. Preparation
+
+Before generating mockups, check for design context in the project:
+- Read any `DESIGN_GUIDE.md`, design tokens, or existing mockups in the project
+- Check `CLAUDE.md` for design system references
+- If the project has an established visual language, the mockups MUST use it (don't invent a new one)
+- If no design system exists, explore freely across the full aesthetic spectrum
+
 ### 1. Start the server (background)
 
+First check if a design-explorer server is already running:
 ```bash
-mkdir -p {working_dir}/mockups
-node ~/.claude/skills/design-explorer/assets/server.js --dir {working_dir}/mockups --port 10000 &
+curl -s http://localhost:10000/health && echo "Server already running" || {
+  mkdir -p {working_dir}/mockups
+  node ~/.claude/skills/design-explorer/assets/server.js --dir {working_dir}/mockups --port 10000 &
+}
 ```
+
+If port 10000 is taken by something else, use `--port 10001` etc. Don't waste turns debugging port conflicts.
 
 The server auto-opens the browser. It watches the mockup directory and pushes live updates via SSE — no reload needed.
 
@@ -36,7 +49,7 @@ A mockup file is a `<section>` wrapper — no `<html>`, `<head>`, or boilerplate
 </section>
 ```
 
-**Write mockups in parallel** — each is an independent file. Generate 5-10+ mockups per round.
+**Write mockups in batches of 5** — each is an independent file. Write 5 in parallel, then another 5. Writing all 10 in one parallel blast can exceed output token limits and crash the response.
 
 ### What's available inside each mockup
 
@@ -92,11 +105,19 @@ Browse the full set at https://lucide.dev/icons
 
 ### 3. Wait for feedback
 
-Tell the user the mockups are ready and to paste their feedback when done. The user reviews mockups full-screen using keyboard shortcuts, records voice notes (if configured), then presses C to copy feedback and pastes it back.
+Tell the user:
+1. The mockups are live at `http://localhost:10000` (include the URL)
+2. Use arrow keys to navigate, up/down to vote, Tab for notes, C to copy feedback
+3. Paste the copied feedback back here when done
 
-Between rounds: `curl -s -X POST http://localhost:10000/session` to mark a new session.
+Do NOT proceed until the user pastes feedback. Wait for it.
 
 ### 4. Iterate
+
+**IMPORTANT**: Before generating new mockups, mark a new session so the carousel shows round navigation:
+```bash
+curl -s -X POST http://localhost:10000/session
+```
 
 Based on feedback:
 - **Edit** a specific mockup: read + edit its file (e.g., `mockup-3.html`)
