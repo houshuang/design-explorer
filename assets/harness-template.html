@@ -62,16 +62,19 @@
     }
     .slide-inner {
       max-width: 900px; width: 100%; background: #fff; border-radius: 12px;
-      box-shadow: 0 2px 24px rgba(0,0,0,0.06); padding: 32px; position: relative;
+      box-shadow: 0 2px 24px rgba(0,0,0,0.06); position: relative;
       border-top: 4px solid transparent; transition: border-color 0.25s, transform 0.25s;
-      height: fit-content; transform-origin: top center;
+      height: fit-content; transform-origin: top center; overflow: hidden;
     }
     .slide-inner.liked { border-top-color: #22c55e; }
     .slide-inner.disliked { border-top-color: #ef4444; }
     .slide-label {
       font-size: 13px; font-weight: 600; color: #999; text-transform: uppercase;
-      letter-spacing: 0.5px; margin-bottom: 16px; padding-bottom: 12px;
+      letter-spacing: 0.5px; padding: 16px 24px 12px; margin: 0;
       border-bottom: 1px solid #eee;
+    }
+    .slide-content iframe {
+      width: 100%; border: none; display: block; min-height: 200px;
     }
 
     /* ── Bottom bar ──────────────────────────── */
@@ -233,6 +236,30 @@
       return visible()[currentIndex] || null;
     }
 
+    // ── Iframe harness for mockup isolation ─────────
+    function buildIframeSrc(contentHtml, mockupId) {
+      const scr = 'script';
+      return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>*,*::before,*::after{box-sizing:border-box}body{margin:0;padding:0;font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;overflow-x:hidden}</style>
+<${scr} src="https://cdn.tailwindcss.com"></${scr}>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Crimson+Pro:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,500;0,700;1,400;1,500&family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+<${scr} src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></${scr}>
+</head><body>
+${contentHtml}
+<${scr}>(function(){
+if(window.lucide)try{lucide.createIcons()}catch(e){}
+var id=${JSON.stringify(mockupId)};
+function report(){parent.postMessage({type:"mockup-resize",id:id,height:document.documentElement.scrollHeight},"*")}
+new ResizeObserver(report).observe(document.documentElement);
+window.addEventListener("load",report);
+var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
+})()</${scr}>
+</body></html>`;
+    }
+
     // ── Carousel navigation ──────────────────────
     function goTo(idx) {
       const vi = visibleIndices();
@@ -259,7 +286,10 @@
 
       const content = document.createElement('div');
       content.className = 'slide-content';
-      content.innerHTML = mockup.contentHtml;
+      const iframe = document.createElement('iframe');
+      iframe.dataset.mockupId = mockup.id;
+      iframe.srcdoc = buildIframeSrc(mockup.contentHtml, mockup.id);
+      content.appendChild(iframe);
 
       inner.appendChild(label);
       inner.appendChild(content);
@@ -663,10 +693,15 @@
       const section = div.querySelector('.mockup-section') || div.querySelector('section');
       if (section) {
         const id = section.dataset.mockupId || '';
-        const labelEl = section.querySelector('.mockup-label');
-        const label = labelEl ? labelEl.textContent.trim() : id;
+        const label = section.dataset.label ||
+                      (section.querySelector('.mockup-label')?.textContent.trim()) ||
+                      id;
         const content = section.querySelector('.mockup-content');
-        return { id, label, contentHtml: content ? content.innerHTML : section.innerHTML };
+        if (content) return { id, label, contentHtml: content.innerHTML };
+        // Simplified format: strip header if present, use remaining content
+        const header = section.querySelector('.mockup-header');
+        if (header) header.remove();
+        return { id, label, contentHtml: section.innerHTML };
       }
       return { id: '', label: '', contentHtml: html };
     }
@@ -704,9 +739,9 @@
 
       const slides = carousel.querySelectorAll('.slide');
       if (slides[idx]) {
-        const content = slides[idx].querySelector('.slide-content');
+        const iframe = slides[idx].querySelector('iframe');
         const label = slides[idx].querySelector('.slide-label');
-        if (content) content.innerHTML = parsed.contentHtml;
+        if (iframe) iframe.srcdoc = buildIframeSrc(parsed.contentHtml, data.id);
         if (label) label.textContent = mockups[idx].label;
       }
       updateUI();
@@ -756,6 +791,18 @@
         sessionsEl.appendChild(pill);
       }
     }
+
+    // ── Iframe height sync ──────────────────────────
+    window.addEventListener('message', (e) => {
+      if (e.data?.type === 'mockup-resize') {
+        const id = CSS.escape(e.data.id);
+        const iframe = carousel.querySelector(`iframe[data-mockup-id="${id}"]`);
+        if (iframe) {
+          iframe.style.height = e.data.height + 'px';
+          if (fitMode) applyFitScale();
+        }
+      }
+    });
 
     // ── Init ─────────────────────────────────────
     (async () => {

@@ -27,29 +27,68 @@ The server auto-opens the browser. It watches the mockup directory and pushes li
 
 Each mockup is a **separate HTML fragment file**: `mockup-1.html`, `mockup-2.html`, etc.
 
-A mockup file is just a `<section>` element — no `<html>`, `<head>`, or harness code. The harness renders voting UI — do NOT include rating buttons.
+A mockup file is a `<section>` wrapper — no `<html>`, `<head>`, or boilerplate needed. Each mockup renders inside an **isolated iframe** with pre-loaded resources (see "What's available inside each mockup" below).
 
 ```html
-<section class="mockup-section" data-mockup-id="mockup-1">
-  <div class="mockup-header">
-    <h2 class="mockup-label">1. Design Name</h2>
-  </div>
-  <div class="mockup-content">
-    <!-- DESIGN HTML HERE — use inline styles or scoped <style> -->
-    <!-- Max-width is ~900px, design accordingly -->
-  </div>
+<section class="mockup-section" data-mockup-id="mockup-1" data-label="1. Design Name">
+  <!-- Your design HTML goes directly here -->
+  <!-- Tailwind classes, custom <style> blocks, Lucide icons, Google Fonts all available -->
 </section>
 ```
 
 **Write mockups in parallel** — each is an independent file. Generate 5-10+ mockups per round.
 
+### What's available inside each mockup
+
+Every mockup renders inside an isolated iframe with these resources pre-loaded. Use them freely without adding imports or boilerplate:
+
+**Tailwind CSS** (full JIT compiler via CDN)
+- Use any Tailwind utility class directly: `class="flex items-center gap-4 bg-zinc-900 p-8"`
+- Custom `<style>` blocks work alongside Tailwind for anything beyond utilities
+- Customize Tailwind config inline if needed: `<script>tailwind.config = { theme: { extend: { colors: { parchment: '#f7f4ec' } } } }</script>`
+
+**Google Fonts** — 11 diverse families pre-loaded, spanning the full aesthetic range:
+
+| Font | Character | Good for |
+|------|-----------|----------|
+| **Inter** | Clean, neutral sans | Modern UI, dashboards, apps |
+| **DM Sans** | Geometric, warm | Friendly brands, marketing |
+| **Space Grotesk** | Techy, distinctive | Developer tools, tech products |
+| **Syne** | Futuristic geometric | Experimental, avant-garde, kinetic |
+| **Cormorant Garamond** | Elegant display serif | Editorial, luxury, scholarly |
+| **EB Garamond** | Classical body serif | Books, manuscripts, traditional |
+| **Crimson Pro** | Readable body serif | Long-form reading, articles |
+| **Playfair Display** | Bold editorial serif | Headlines, magazines, drama |
+| **Instrument Serif** | Contemporary serif | Fashion, art, distinctive branding |
+| **JetBrains Mono** | Coding monospace | Technical UI, terminals, data |
+| **Space Mono** | Quirky monospace | Retro-tech, brutalist, playful |
+
+Use via CSS (`font-family: 'Cormorant Garamond'`) or Tailwind (`class="font-['Cormorant_Garamond']"`).
+Additional fonts: add `@import` in a `<style>` block for any Google Font not in this list.
+
+**Lucide Icons** — 1500+ icons, no SVG code needed:
+```html
+<i data-lucide="search"></i>
+<i data-lucide="menu"></i>
+<i data-lucide="heart" class="w-5 h-5 text-red-500"></i>
+```
+Browse the full set at https://lucide.dev/icons
+
+**CSS baseline:**
+- `box-sizing: border-box` on all elements
+- `body { margin: 0; padding: 0 }` — you control all spacing
+- Font smoothing and optimized text rendering enabled
+- Default font: Inter (override freely — this is just a fallback, not a recommendation)
+
 ### Design generation principles
 
-- **Be diverse**: Don't generate 10 variations of the same idea. Explore fundamentally different approaches, layouts, color schemes, interaction models.
-- **Be innovative**: Include at least 2-3 unconventional or surprising approaches the user wouldn't have thought of.
-- **Binary search the design space**: Cover the extremes — minimal vs. maximal, dark vs. light, dense vs. spacious, playful vs. serious.
-- **Unique functionality**: Each mockup should showcase a different feature idea or interaction pattern, not just visual restyling.
-- **Self-contained**: Each mockup uses inline styles or a scoped `<style>` tag. No external dependencies.
+- **Be radically diverse**: Don't generate variations of the same idea. Explore fundamentally different visual languages, layouts, color palettes, typography pairings, and interaction models.
+- **Push beyond defaults**: Include unconventional, surprising, even provocative approaches. Brutalist, maximalist, kinetic, editorial, retro-futuristic, organic, neo-classical, deconstructed — go well beyond safe corporate UI patterns.
+- **Binary search the design space**: Cover extremes — minimal vs. maximal, dark vs. light, dense vs. spacious, serif vs. sans, geometric vs. organic, structured vs. freeform, warm vs. cool, quiet vs. bold.
+- **Unique functionality**: Each mockup should showcase different feature ideas or interaction patterns, not just visual restyling of the same layout.
+- **Full creative range**: The pre-loaded resources support everything from Renaissance-folio aesthetics (Cormorant Garamond, warm parchment palettes, structural ornaments, hairline rules) to brutalist tech (Space Mono, raw CSS grid, high contrast, no border-radius) to futuristic experimental (Syne, gradients, glassmorphism, asymmetric layouts). Use the full spectrum.
+- **Bespoke over generic**: Each design should feel like it was made for this specific product, not assembled from a component library. Invent custom visual metaphors, unique color relationships, and distinctive spatial rhythms.
+- **Self-contained**: Each mockup uses Tailwind classes, inline styles, or scoped `<style>` tags. No external dependencies needed beyond what the harness provides.
 
 ### 3. Wait for feedback
 
@@ -88,11 +127,20 @@ Too busy, hard to read
 - **Notes are the richest signal** — read carefully for nuance and specific elements called out
 - Focus on what the user LIKED and amplify those qualities in next round
 
-## Key Benefits of Fragment Architecture
+## Technical notes
 
-- **Write**: Each mockup is 20-40 lines, not a 500-line monolith
+- **Isolation**: Each mockup renders in its own iframe. CSS and JS cannot leak between mockups or break the carousel UI. A broken mockup cannot crash the page.
+- **Auto-height**: Iframes auto-resize to match their content height. The slide container scrolls if content exceeds the viewport.
+- **Live updates**: When you edit a mockup file, the iframe reloads with updated content. Resources load from browser cache, so updates appear near-instantly.
+- **Backwards compatibility**: The old format with `.mockup-header` + `.mockup-content` wrapper divs still works. The simpler `data-label` format is preferred going forward.
+- **Full-bleed support**: The card has no internal padding — mockups control their own spacing. Use `p-8`, `p-12`, or any padding you want. Or go edge-to-edge within the card for full-bleed layouts.
+
+## Key benefits of fragment architecture
+
+- **Write**: Each mockup is 20-50 lines, not a 500-line monolith
 - **Edit**: Read + edit one small file, not search through a huge page
 - **Delete**: Just delete the file
 - **Parallel writes**: Write 5 mockups in 5 parallel tool calls
-- **No harness duplication**: CSS/JS lives in the template, never in your output
+- **No boilerplate**: Tailwind, fonts, icons, and CSS reset are provided by the harness — never write these
+- **No CSS conflicts**: iframe isolation means mockup styles can't break other mockups or the carousel
 - **Live updates**: SSE pushes add/update/remove — no full page reloads
