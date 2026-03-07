@@ -86,7 +86,11 @@ If no key is found, voice is silently disabled and the mic button is hidden. Eve
     └── harness-template.html   # Full-screen carousel UI (~770 lines)
 ```
 
-**Fragment architecture**: Each mockup is a standalone HTML file (`<section>` with scoped styles). The harness renders the carousel, voting, notes, and voice UI around them. Claude writes small focused fragments, not monolithic pages.
+**Fragment architecture**: Each mockup is a standalone HTML file (`<section>` with scoped styles). Each mockup renders inside an **isolated iframe** with pre-loaded resources (Tailwind CSS, 11 Google Fonts, Lucide icons). Claude writes small focused fragments, not monolithic pages.
+
+**Iframe isolation**: CSS and JS cannot leak between mockups or break the carousel. A broken mockup cannot crash the page.
+
+**Pre-loaded harness**: Every iframe includes Tailwind CSS (full JIT), 11 Google Fonts (Inter, DM Sans, Space Grotesk, Syne, Cormorant Garamond, EB Garamond, Crimson Pro, Playfair Display, Instrument Serif, JetBrains Mono, Space Mono), and Lucide icons — so mockups stay compact and token-efficient.
 
 **Server**: Watches the mockup directory, diffs file changes, pushes granular SSE events (`add`/`update`/`remove`). Supports sessions for tracking iteration rounds.
 
