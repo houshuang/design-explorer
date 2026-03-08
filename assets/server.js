@@ -131,18 +131,15 @@ function scanWorkspace(ws) {
     }
   }
 
-  // Auto-session: batch new files, create session after 3s of quiet
+  // Auto-session: batch new files, create session after 60s of quiet.
+  // 60s debounce handles sequential writes where each mockup takes 5-20s to generate.
+  // The timer resets with every new file, so it only fires 60s after the LAST file.
   if (hasNewFiles) {
-    const now = Date.now();
-    const quietPeriod = now - ws.lastFileAdd > 5000;
-    ws.lastFileAdd = now;
-
+    ws.lastFileAdd = Date.now();
     if (ws.autoSessionTimer) clearTimeout(ws.autoSessionTimer);
     ws.autoSessionTimer = setTimeout(() => {
-      if (quietPeriod || ws.sessions.length === 0) {
-        autoCreateSession(ws);
-      }
-    }, 3000);
+      autoCreateSession(ws);
+    }, 60000);
   }
 
   ws.lastActive = Date.now();

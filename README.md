@@ -7,14 +7,19 @@ https://github.com/user-attachments/assets/placeholder — TODO: add demo gif
 ## How it works
 
 1. You describe what you want designed (a landing page, a dashboard, a component)
-2. Claude generates 5-10+ diverse HTML mockups as separate files
-3. A local server serves them in a full-screen carousel with live updates
-4. You review with keyboard shortcuts: arrow keys to navigate, ↑/↓ to vote, notes, optional voice
-5. Press `C` to copy structured feedback, paste it back to Claude
-6. Claude iterates — editing liked mockups, removing disliked ones, adding new variants
-7. Repeat until you're happy
+2. Claude registers a workspace with the global singleton server (starts it if needed)
+3. Claude generates 5-10+ diverse HTML mockups as separate files
+4. A local server serves them in a full-screen carousel with live updates
+5. You review with keyboard shortcuts: arrow keys to navigate, ↑/↓ to vote, notes, optional voice
+6. Press `C` to submit feedback — it's written to `feedback.md` and Claude picks it up automatically
+7. Claude iterates — editing liked mockups, removing disliked ones, adding new variants
+8. Repeat until you're happy
 
-Each round uses sessions to track history. The browser updates live as Claude writes files — no page reloads.
+**Global singleton**: One server on port 10000 serves all projects. Multiple Claude instances in different projects each register a workspace and get their own tab in the browser UI — no port conflicts, no confusion.
+
+**Auto-sessions**: The server detects batches of new mockup files and creates session boundaries automatically. No manual session management needed.
+
+**Feedback file**: When you submit feedback, it's written to `{mockupDir}/feedback.md` AND copied to clipboard. Claude watches the file — no need to paste.
 
 ## Install
 
@@ -52,7 +57,7 @@ Or just describe what you want and mention "design" or "mockup" — Claude will 
 | `Tab` | Focus notes textarea |
 | `Esc` | Blur notes |
 | `F` | Toggle fit-to-window |
-| `C` | Copy all feedback to clipboard |
+| `C` | Submit feedback (writes to file + clipboard) |
 | `?` | Show/hide shortcut help |
 | Hold `Space` | Voice note (requires Soniox) |
 
@@ -79,12 +84,19 @@ If no key is found, voice is silently disabled and the mic button is hidden. Eve
 
 ```
 ~/.claude/skills/design-explorer/
-├── SKILL.md                    # Claude Code skill definition
+├── SKILL.md                    # Claude Code skill definition (workflow for Claude)
 ├── README.md                   # This file
+├── CHANGELOG.md                # Version history
+├── bin/
+│   ├── register                # Register workspace (starts server if needed)
+│   ├── status                  # Show server status and workspaces
+│   └── stop                    # Stop the server
 └── assets/
-    ├── server.js               # Node server (~190 lines, zero deps)
-    └── harness-template.html   # Full-screen carousel UI (~770 lines)
+    ├── server.js               # Node server (~280 lines, zero deps)
+    └── harness-template.html   # Full-screen carousel UI with workspace tabs
 ```
+
+**Global singleton server**: One server on port 10000 serves all projects. Each Claude instance registers a workspace (project path + optional branch). The browser shows a tab bar for switching between workspaces.
 
 **Fragment architecture**: Each mockup is a standalone HTML file (`<section>` with scoped styles). Each mockup renders inside an **isolated iframe** with pre-loaded resources (Tailwind CSS, 11 Google Fonts, Lucide icons). Claude writes small focused fragments, not monolithic pages.
 
@@ -92,19 +104,40 @@ If no key is found, voice is silently disabled and the mic button is hidden. Eve
 
 **Pre-loaded harness**: Every iframe includes Tailwind CSS (full JIT), 11 Google Fonts (Inter, DM Sans, Space Grotesk, Syne, Cormorant Garamond, EB Garamond, Crimson Pro, Playfair Display, Instrument Serif, JetBrains Mono, Space Mono), and Lucide icons — so mockups stay compact and token-efficient.
 
-**Server**: Watches the mockup directory, diffs file changes, pushes granular SSE events (`add`/`update`/`remove`). Supports sessions for tracking iteration rounds.
+**Auto-sessions**: The server watches for new mockup files and creates session boundaries automatically (60s debounce — the timer resets with each new file, so it only fires 60s after the last file in a batch). This handles both parallel and sequential mockup generation.
+
+**Feedback file**: When the user presses `C` (Submit), feedback for the current session is POSTed to the server, which writes it to `{mockupDir}/feedback.md`. Claude watches this file — no clipboard paste needed.
+
+**PID management**: Server writes `~/.claude/design-explorer.pid`. Idle shutdown after 30 min with no registered workspaces.
 
 **No build step, no npm install, no dependencies.**
 
-## Server CLI
+## CLI Tools
 
 ```bash
-node ~/.claude/skills/design-explorer/assets/server.js [options]
+# Register a workspace (starts server if not running, opens browser on first registration)
+~/.claude/skills/design-explorer/bin/register --project /path --dir /path/mockups [--branch main]
 
-  --dir <path>     Mockup directory (default: current directory)
-  --port <number>  Port (default: 8000)
-  --no-open        Don't auto-open browser
-  --harness <path> Custom harness template
+# Check server status and list workspaces
+~/.claude/skills/design-explorer/bin/status
+
+# Stop the server
+~/.claude/skills/design-explorer/bin/stop
+```
+
+The `register` script is the primary entry point. It:
+1. Checks if the server is running (health check on port 10000)
+2. Starts the server if not running (cleans stale PID files)
+3. Registers the workspace via `POST /workspace/register`
+4. Opens the browser on first registration only
+5. Outputs the workspace ID to stdout
+
+### Legacy mode
+
+The server still accepts `--dir <path>` for backwards compatibility, which auto-registers a single workspace:
+
+```bash
+node ~/.claude/skills/design-explorer/assets/server.js --dir ./mockups
 ```
 
 ## License
