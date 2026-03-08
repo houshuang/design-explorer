@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Register a workspace with the Design Explorer singleton server.
+# Starts the server if not running. Outputs the workspace ID.
+#
+# Usage: register --project /path --branch main --dir /path/mockups
+#   --project  Project root path (required)
+#   --branch   Git branch name (optional, default: current branch or "default")
+#   --dir      Mockup directory (required, created if missing)
+
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SERVER_JS="$SKILL_DIR/assets/server.js"
+PID_FILE="$HOME/.claude/design-explorer.pid"
+PORT=10000
+PROJECT=""
+BRANCH=""
+DIR=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --project) PROJECT="$2"; shift 2 ;;
+    --branch)  BRANCH="$2"; shift 2 ;;
+    --dir)     DIR="$2"; shift 2 ;;
+    --port)    PORT="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+if [[ -z "$PROJECT" || -z "$DIR" ]]; then
+  echo "Usage: register --project /path --dir /path/mockups [--branch main]" >&2
+  exit 1
+fi
+
+# Auto-detect branch if not provided
+if [[ -z "$BRANCH" ]]; then
+  BRANCH=$(cd "$PROJECT" 2>/dev/null && git branch --show-current 2>/dev/null || echo "default")
+fi
+
+# Ensure mockup directory exists
+mkdir -p "$DIR"
+
+# Check if server is already running
+server_running() {
+  curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1
+}
+
+# Start server if needed
+if ! server_running; then
+  # Clean stale PID file
+  if [[ -f "$PID_FILE" ]]; then
+    OLD_PID=$(cat "$PID_FILE" 2>/dev/null || true)
+    if [[ -n "$OLD_PID" ]] && ! kill -0 "$OLD_PID" 2>/dev/null; then
+      rm -f "$PID_FILE"
+    fi
+  fi
+
+  node "$SERVER_JS" --port "$PORT" --no-open &
+  SERVER_PID=$!
+  disown "$SERVER_PID" 2>/dev/null || true
+
+  # Wait for server to be ready (up to 5s)
+  for i in $(seq 1 50); do
+    if server_running; then break; fi
+    sleep 0.1
+  done
+
+  if ! server_running; then
+    echo "Failed to start server" >&2
+    exit 1
+  fi
+fi
+
+# Register workspace
+RESULT=$(curl -sf -X POST "http://localhost:$PORT/workspace/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"projectPath\": \"$PROJECT\", \"branch\": \"$BRANCH\", \"mockupDir\": \"$DIR\"}")
+
+# Extract and output workspace ID
+WORKSPACE_ID=$(echo "$RESULT" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [[ -z "$WORKSPACE_ID" ]]; then
+  echo "Failed to register workspace" >&2
+  echo "$RESULT" >&2
+  exit 1
+fi
+
+echo "$WORKSPACE_ID"

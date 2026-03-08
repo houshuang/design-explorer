@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Show Design Explorer server status and registered workspaces.
+set -euo pipefail
+
+PORT=${1:-10000}
+
+HEALTH=$(curl -sf "http://localhost:$PORT/health" 2>/dev/null) || {
+  echo "Server not running"
+  exit 1
+}
+
+echo "$HEALTH" | python3 -c "
+import json, sys
+h = json.load(sys.stdin)
+print(f'PID: {h[\"pid\"]}  Port: {h[\"port\"]}  Voice: {\"✓\" if h[\"soniox\"] else \"✗\"}')
+print(f'Workspaces: {len(h[\"workspaces\"])}')
+for ws in h['workspaces']:
+    print(f'  • {ws[\"id\"]:30s}  {ws[\"mockups\"]:3d} mockups  {ws[\"sessions\"]:2d} sessions  {ws[\"mockupDir\"]}')
+" 2>/dev/null || echo "$HEALTH"

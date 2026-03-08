@@ -6,7 +6,7 @@ user_invocable: true
 
 # Design Explorer
 
-Generate many diverse design mockups as HTML fragments. The server serves a full-screen keyboard-driven carousel with thumbs voting, notes, and optional voice recording. User copies compiled feedback to clipboard and pastes it back.
+Generate many diverse design mockups as HTML fragments. A global singleton server serves a full-screen keyboard-driven carousel with thumbs voting, notes, and optional voice recording. Feedback is written to a file that Claude can watch — no clipboard paste needed.
 
 ## Trigger
 
@@ -22,19 +22,17 @@ Before generating mockups, check for design context in the project:
 - If the project has an established visual language, use it by default — unless the user explicitly asks to explore alternative designs. In that case, still read the existing design as a baseline to riff from, but feel free to diverge.
 - If no design system exists, explore freely across the full aesthetic spectrum
 
-### 1. Start the server (background)
+### 1. Register with the server
 
-First check if a design-explorer server is already running:
 ```bash
-curl -s http://localhost:10000/health && echo "Server already running" || {
-  mkdir -p {working_dir}/mockups
-  node ~/.claude/skills/design-explorer/assets/server.js --dir {working_dir}/mockups --port 10000 &
-}
+mkdir -p {working_dir}/mockups
+WORKSPACE_ID=$(~/.claude/skills/design-explorer/bin/register \
+  --project "{working_dir}" --dir "{working_dir}/mockups")
 ```
 
-If port 10000 is taken by something else, use `--port 10001` etc. Don't waste turns debugging port conflicts.
+This starts the server if not running (always port 10000), registers a workspace, and opens the browser on first registration. If another project is already using the server, this project gets a separate tab in the UI.
 
-The server auto-opens the browser. It watches the mockup directory and pushes live updates via SSE — no reload needed.
+The server URL is always `http://localhost:10000`.
 
 ### 2. Generate mockups
 
@@ -50,6 +48,8 @@ A mockup file is a `<section>` wrapper — no `<html>`, `<head>`, or boilerplate
 ```
 
 **Write mockups in batches of 5** — each is an independent file. Write 5 in parallel, then another 5. Writing all 10 in one parallel blast can exceed output token limits and crash the response.
+
+**Sessions are automatic.** The server detects new file batches and creates sessions (rounds) automatically. No need to call any session endpoint.
 
 ### What's available inside each mockup
 
@@ -106,24 +106,27 @@ Browse the full set at https://lucide.dev/icons
 ### 3. Wait for feedback
 
 Tell the user:
-1. The mockups are live at `http://localhost:10000` (include the URL)
-2. Use arrow keys to navigate, up/down to vote, Tab for notes, C to copy feedback
-3. Paste the copied feedback back here when done
+1. The mockups are live at `http://localhost:10000` (always the same URL)
+2. Use arrow keys to navigate, up/down to vote, Tab for notes, C to submit feedback
+3. Feedback is automatically written to `{working_dir}/mockups/feedback.md`
 
-Do NOT proceed until the user pastes feedback. Wait for it.
+Then **watch for the feedback file**:
+```bash
+# Wait for feedback.md to appear or be updated
+while [ ! -f {working_dir}/mockups/feedback.md ] || [ "$(cat {working_dir}/mockups/feedback.md 2>/dev/null)" = "$LAST_FEEDBACK" ]; do sleep 2; done
+LAST_FEEDBACK=$(cat {working_dir}/mockups/feedback.md)
+```
+
+Read the feedback file when it appears and iterate. Do NOT ask the user to paste — the file contains the full feedback.
 
 ### 4. Iterate
-
-**IMPORTANT**: Before generating new mockups, mark a new session so the carousel shows round navigation:
-```bash
-curl -s -X POST http://localhost:10000/session
-```
 
 Based on feedback:
 - **Edit** a specific mockup: read + edit its file (e.g., `mockup-3.html`)
 - **Remove** a thumbs-down mockup: delete its file
 - **Add** new variants: write new `mockup-N.html` files
 - The browser updates live on every file change — no reload
+- Sessions are created automatically for each new batch
 - Go back to step 3
 
 ### Interpreting feedback
@@ -150,11 +153,27 @@ Too busy, hard to read
 
 ## Technical notes
 
-- **Isolation**: Each mockup renders in its own iframe. CSS and JS cannot leak between mockups or break the carousel UI. A broken mockup cannot crash the page.
-- **Auto-height**: Iframes auto-resize to match their content height. The slide container scrolls if content exceeds the viewport.
-- **Live updates**: When you edit a mockup file, the iframe reloads with updated content. Resources load from browser cache, so updates appear near-instantly.
-- **Backwards compatibility**: The old format with `.mockup-header` + `.mockup-content` wrapper divs still works. The simpler `data-label` format is preferred going forward.
-- **Full-bleed support**: The card has no internal padding — mockups control their own spacing. Use `p-8`, `p-12`, or any padding you want. Or go edge-to-edge within the card for full-bleed layouts.
+- **Global singleton**: One server on port 10000 serves all projects. Each project registers as a workspace with its own tab in the UI.
+- **Auto-sessions**: The server automatically creates session boundaries when it detects batches of new files. No need to manually mark sessions.
+- **Feedback file**: When the user presses C (or clicks Submit), feedback is written to `{mockupDir}/feedback.md` AND copied to clipboard. Claude watches the file.
+- **Isolation**: Each mockup renders in its own iframe. CSS and JS cannot leak between mockups or break the carousel UI.
+- **Auto-height**: Iframes auto-resize to match their content height.
+- **Live updates**: When you edit a mockup file, the iframe reloads with updated content.
+- **PID management**: Server writes `~/.claude/design-explorer.pid`. Idle shutdown after 30 min with no workspaces.
+- **Legacy compat**: The old `--dir` flag still works for single-workspace mode.
+
+## CLI tools
+
+```bash
+# Register workspace (starts server if needed)
+~/.claude/skills/design-explorer/bin/register --project /path --dir /path/mockups [--branch main]
+
+# Check server status
+~/.claude/skills/design-explorer/bin/status
+
+# Stop server
+~/.claude/skills/design-explorer/bin/stop
+```
 
 ## Key benefits of fragment architecture
 

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Stop the Design Explorer singleton server.
+set -euo pipefail
+
+PID_FILE="$HOME/.claude/design-explorer.pid"
+PORT=${1:-10000}
+
+# Try graceful shutdown via PID file
+if [[ -f "$PID_FILE" ]]; then
+  PID=$(cat "$PID_FILE" 2>/dev/null || true)
+  if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
+    kill "$PID" 2>/dev/null
+    echo "Stopped server (PID $PID)"
+    exit 0
+  else
+    rm -f "$PID_FILE"
+  fi
+fi
+
+# Fallback: find by port
+PID=$(lsof -ti ":$PORT" 2>/dev/null | head -1 || true)
+if [[ -n "$PID" ]]; then
+  kill "$PID" 2>/dev/null
+  echo "Stopped server (PID $PID)"
+else
+  echo "Server not running"
+fi

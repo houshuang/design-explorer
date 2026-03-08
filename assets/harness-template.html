@@ -11,6 +11,39 @@
       background: #f5f5f5; overflow: hidden; height: 100vh; width: 100vw; color: #333;
     }
 
+    /* ── Workspace bar ────────────────────────── */
+    #workspace-bar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 150;
+      height: 36px; display: flex; align-items: center; gap: 0;
+      background: #1a1a1a; padding: 0 12px; display: none;
+    }
+    .ws-tab {
+      padding: 6px 14px; font-size: 12px; font-weight: 500; cursor: pointer;
+      color: #888; border: none; background: none; font-family: inherit;
+      border-bottom: 2px solid transparent; transition: all 0.15s;
+      display: flex; align-items: center; gap: 6px; white-space: nowrap;
+    }
+    .ws-tab:hover { color: #ccc; }
+    .ws-tab.active { color: #fff; border-bottom-color: #fff; }
+    .ws-tab .ws-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #555; transition: background 0.3s;
+    }
+    .ws-tab.active .ws-dot { background: #22c55e; }
+    .ws-tab .ws-badge {
+      font-size: 10px; background: #ef4444; color: #fff; padding: 0 5px;
+      border-radius: 8px; min-width: 16px; text-align: center;
+      animation: badgePop 0.3s ease-out;
+    }
+    @keyframes badgePop { from { transform: scale(0); } to { transform: scale(1); } }
+
+    body.has-workspaces #workspace-bar { display: flex; }
+    body.has-workspaces .slide { padding-top: 92px; }
+    body.has-workspaces #counter { top: 52px; }
+    body.has-workspaces #sessions { top: 52px; }
+    body.has-workspaces #fit-btn { top: 52px; }
+    body.has-workspaces #submit-btn { top: 52px; }
+
     /* ── Top bar ─────────────────────────────── */
     #counter {
       position: fixed; top: 16px; left: 20px; z-index: 100;
@@ -29,16 +62,19 @@
     }
     .session-pill.active { background: #333; color: #fff; border-color: #333; }
     .session-pill:hover { border-color: #999; }
-    #copy-btn {
+    #submit-btn {
       position: fixed; top: 16px; right: 20px; z-index: 100;
-      font-size: 15px; cursor: pointer; background: rgba(255,255,255,0.92);
-      padding: 0; width: 34px; height: 34px; border-radius: 20px; backdrop-filter: blur(8px);
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: none; transition: transform 0.15s;
-      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; cursor: pointer; background: #22c55e;
+      padding: 0 16px; height: 34px; border-radius: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: none; transition: all 0.15s;
+      color: #fff; font-weight: 600; font-family: inherit;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
     }
-    #copy-btn:active { transform: scale(0.9); }
+    #submit-btn:hover { background: #16a34a; }
+    #submit-btn:active { transform: scale(0.95); }
+    #submit-btn.done { background: #333; }
     #fit-btn {
-      position: fixed; top: 16px; right: 62px; z-index: 100;
+      position: fixed; top: 16px; right: 120px; z-index: 100;
       font-size: 13px; cursor: pointer; background: rgba(255,255,255,0.92);
       padding: 0 14px; height: 34px; border-radius: 20px; backdrop-filter: blur(8px);
       box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: none; transition: all 0.15s;
@@ -162,10 +198,11 @@
   </style>
 </head>
 <body>
+  <div id="workspace-bar"></div>
   <div id="counter"></div>
   <div id="sessions"></div>
   <button id="fit-btn" title="Fit to window (F)">Fit</button>
-  <button id="copy-btn" title="Copy feedback (C)">📋</button>
+  <button id="submit-btn" title="Submit feedback (C)">Submit</button>
 
   <div id="carousel"></div>
 
@@ -199,9 +236,11 @@
     /*__SONIOX_KEY_INJECT__*/
 
     // ── State ────────────────────────────────────
-    const mockups = [];     // [{id, label, contentHtml, session, vote, notes, voiceNotes}]
+    const mockups = [];     // [{id, label, contentHtml, session, workspace, vote, notes}]
     let currentIndex = 0;   // index into visible mockups
     let currentSession = null;
+    let currentWorkspace = null; // workspace ID or null (show all)
+    let knownWorkspaces = [];    // [{id, projectName, branch, mockups, lastActive}]
     let notesActive = false;
     let recording = false;
 
@@ -217,14 +256,17 @@
     const btnDown     = $('btn-down');
     const waveform    = $('waveform');
     const micBtn      = $('mic-btn');
-    const copyBtn     = $('copy-btn');
+    const submitBtn   = $('submit-btn');
     const helpBtn     = $('help-btn');
     const helpOverlay = $('shortcuts-overlay');
+    const workspaceBar = $('workspace-bar');
 
     // ── Helpers ──────────────────────────────────
     function visible() {
-      if (currentSession === null) return mockups;
-      return mockups.filter(m => m.session === currentSession);
+      let filtered = mockups;
+      if (currentWorkspace !== null) filtered = filtered.filter(m => m.workspace === currentWorkspace);
+      if (currentSession !== null) filtered = filtered.filter(m => m.session === currentSession);
+      return filtered;
     }
 
     function visibleIndices() {
@@ -381,7 +423,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
           if (!notesActive) { e.preventDefault(); toggleFit(); }
           break;
         case 'c': case 'C':
-          if (!notesActive) { e.preventDefault(); copyFeedback(); }
+          if (!notesActive) { e.preventDefault(); submitFeedback(); }
           break;
         case '?':
           if (!notesActive) { e.preventDefault(); toggleHelp(); }
@@ -442,30 +484,58 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
     fitBtn.onclick = toggleFit;
     window.addEventListener('resize', () => { if (fitMode) applyFitScale(); });
 
-    // ── Copy feedback ────────────────────────────
-    function copyFeedback() {
+    // ── Submit feedback (write to file + clipboard) ──
+    function buildFeedbackText() {
+      const vis = visible();
       const sections = [];
-      for (const m of mockups) {
+      // Header with workspace info
+      const ws = knownWorkspaces.find(w => w.id === currentWorkspace);
+      if (ws) {
+        const sessionLabel = currentSession !== null ? ` — Round ${currentSession}` : '';
+        sections.push(`# Feedback — ${ws.projectName} (${ws.branch})${sessionLabel}\n# Submitted: ${new Date().toISOString()}`);
+      }
+      for (const m of vis) {
         const vote = m.vote === 'up' ? '👍' : m.vote === 'down' ? '👎' : '—';
         const hasNotes = m.notes && m.notes.trim();
-        if (!hasNotes && !m.vote) continue; // skip entirely untouched mockups
+        if (!hasNotes && !m.vote) continue;
         let section = `### ${m.label}  [${vote}]`;
         if (hasNotes) section += '\n' + m.notes.trim();
         sections.push(section);
       }
-      // Append untouched ones as a compact list
-      const untouched = mockups.filter(m => !m.vote && !(m.notes && m.notes.trim()));
+      const untouched = vis.filter(m => !m.vote && !(m.notes && m.notes.trim()));
       if (untouched.length) {
         sections.push('### No feedback\n' + untouched.map(m => '- ' + m.label).join('\n'));
       }
-      const text = sections.join('\n\n');
-      navigator.clipboard.writeText(text.trim()).then(() => {
-        copyBtn.textContent = '✓';
-        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
-      });
+      return sections.join('\n\n').trim();
     }
 
-    copyBtn.onclick = copyFeedback;
+    async function submitFeedback() {
+      const text = buildFeedbackText();
+      const wsId = currentWorkspace || (knownWorkspaces[0] && knownWorkspaces[0].id);
+
+      // Copy to clipboard
+      try { await navigator.clipboard.writeText(text); } catch {}
+
+      // POST to server (writes feedback.md)
+      if (wsId) {
+        try {
+          await fetch(`/workspace/${encodeURIComponent(wsId)}/feedback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: text }),
+          });
+        } catch (e) { console.warn('Failed to submit feedback:', e); }
+      }
+
+      submitBtn.textContent = 'Submitted ✓';
+      submitBtn.classList.add('done');
+      setTimeout(() => {
+        submitBtn.textContent = 'Submit';
+        submitBtn.classList.remove('done');
+      }, 2000);
+    }
+
+    submitBtn.onclick = submitFeedback;
 
     function flash(msg) {
       micBtn.title = msg;
@@ -683,8 +753,90 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       es.addEventListener('add', (e) => addMockup(JSON.parse(e.data)));
       es.addEventListener('update', (e) => updateMockupContent(JSON.parse(e.data)));
       es.addEventListener('remove', (e) => removeMockup(JSON.parse(e.data).id));
+      es.addEventListener('workspaces', (e) => {
+        knownWorkspaces = JSON.parse(e.data);
+        if (knownWorkspaces.length > 0 && currentWorkspace === null) {
+          currentWorkspace = knownWorkspaces[0].id;
+        }
+        updateWorkspaceTabs();
+      });
+      es.addEventListener('workspace-add', (e) => {
+        const ws = JSON.parse(e.data);
+        if (!knownWorkspaces.find(w => w.id === ws.id)) {
+          knownWorkspaces.push(ws);
+          // Auto-select first workspace, show badge on others
+          if (knownWorkspaces.length === 1) currentWorkspace = ws.id;
+        }
+        updateWorkspaceTabs();
+      });
+      es.addEventListener('workspace-remove', (e) => {
+        const { id } = JSON.parse(e.data);
+        knownWorkspaces = knownWorkspaces.filter(w => w.id !== id);
+        if (currentWorkspace === id) {
+          currentWorkspace = knownWorkspaces.length > 0 ? knownWorkspaces[0].id : null;
+          currentIndex = 0;
+          goTo(0);
+        }
+        updateWorkspaceTabs();
+      });
+      es.addEventListener('session', (e) => {
+        const data = JSON.parse(e.data);
+        // Update mockup session assignments
+        if (data.mockups) {
+          for (const mockupId of data.mockups) {
+            const m = mockups.find(mk => mk.id === mockupId);
+            if (m) m.session = data.id;
+          }
+        }
+        updateSessionPills();
+      });
 
       es.onerror = () => { es.close(); setTimeout(connectSSE, 2000); };
+    }
+
+    // ── Workspace tabs ────────────────────────────
+    function updateWorkspaceTabs() {
+      const multi = knownWorkspaces.length > 1;
+      document.body.classList.toggle('has-workspaces', multi);
+
+      if (!multi) {
+        workspaceBar.innerHTML = '';
+        // Update title with single workspace name
+        if (knownWorkspaces.length === 1) {
+          const ws = knownWorkspaces[0];
+          document.title = `${ws.projectName} (${ws.branch}) — Design Explorer`;
+        }
+        return;
+      }
+
+      workspaceBar.innerHTML = '';
+      for (const ws of knownWorkspaces) {
+        const tab = document.createElement('button');
+        tab.className = 'ws-tab' + (currentWorkspace === ws.id ? ' active' : '');
+
+        const dot = document.createElement('span');
+        dot.className = 'ws-dot';
+        tab.appendChild(dot);
+
+        tab.appendChild(document.createTextNode(`${ws.projectName} (${ws.branch})`));
+
+        tab.onclick = () => {
+          if (currentWorkspace === ws.id) return;
+          currentWorkspace = ws.id;
+          currentSession = null;
+          currentIndex = 0;
+          goTo(0);
+          updateWorkspaceTabs();
+          updateSessionPills();
+          document.title = `${ws.projectName} (${ws.branch}) — Design Explorer`;
+        };
+        workspaceBar.appendChild(tab);
+      }
+
+      const activeWs = knownWorkspaces.find(w => w.id === currentWorkspace);
+      if (activeWs) {
+        document.title = `${activeWs.projectName} (${activeWs.branch}) — Design Explorer`;
+      }
     }
 
     function parseMockupHtml(html) {
@@ -718,6 +870,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         label: parsed.label || data.id,
         contentHtml: parsed.contentHtml,
         session: data.session || 0,
+        workspace: data.workspace || null,
         vote: null,
         notes: '',
       };
