@@ -34,14 +34,35 @@ This starts the server if not running (always port 10000), registers a workspace
 
 The server URL is always `http://localhost:10000`.
 
-### 2. Generate mockups
+### 2. Clean up and generate mockups
 
-Each mockup is a **separate HTML fragment file**: `mockup-1.html`, `mockup-2.html`, etc.
+**Before generating, check for existing mockup files:**
+```bash
+ls {working_dir}/mockups/*.html 2>/dev/null
+```
+
+If there are old mockups from previous sessions, **remove them** so the carousel starts clean. Don't read them — just delete them. Also reset sessions.json:
+```bash
+rm -f {working_dir}/mockups/*.html
+echo '[]' > {working_dir}/mockups/sessions.json
+rm -f {working_dir}/mockups/feedback.md
+```
+
+If the user explicitly asks to keep previous mockups (e.g., to iterate on them), skip the cleanup. But the default is a clean slate — old mockups clutter the carousel and slow down review.
+
+Each mockup is a **separate HTML fragment file** with a **descriptive slug name**: `mockup-dark-sidebar.html`, `mockup-minimal-cards.html`, `mockup-retro-brutalist.html`, etc.
+
+**Naming rules:**
+- Use `mockup-{descriptive-slug}.html` — the slug should capture the design's distinctive character in 2-4 words
+- NEVER use generic sequential names like `mockup-1.html` — these collide across sessions and tell you nothing about the content
+- Good examples: `mockup-warm-editorial.html`, `mockup-dense-dashboard.html`, `mockup-organic-cards.html`
+- Bad examples: `mockup-1.html`, `mockup-new.html`, `mockup-v2.html`
+- The `data-mockup-id` must match the filename (without `.html`)
 
 A mockup file is a `<section>` wrapper — no `<html>`, `<head>`, or boilerplate needed. Each mockup renders inside an **isolated iframe** with pre-loaded resources (see "What's available inside each mockup" below).
 
 ```html
-<section class="mockup-section" data-mockup-id="mockup-1" data-label="1. Design Name">
+<section class="mockup-section" data-mockup-id="mockup-warm-editorial" data-label="Warm Editorial">
   <!-- Your design HTML goes directly here -->
   <!-- Tailwind classes, custom <style> blocks, Lucide icons, Google Fonts all available -->
 </section>
@@ -122,9 +143,9 @@ Read the feedback file when it appears and iterate. Do NOT ask the user to paste
 ### 4. Iterate
 
 Based on feedback:
-- **Edit** a specific mockup: read + edit its file (e.g., `mockup-3.html`)
+- **Edit** a specific mockup: read + edit its file (e.g., `mockup-warm-editorial.html`)
 - **Remove** a thumbs-down mockup: delete its file
-- **Add** new variants: write new `mockup-N.html` files
+- **Add** new variants: write new `mockup-{descriptive-slug}.html` files (scan existing files first to avoid name collisions)
 - The browser updates live on every file change — no reload
 - Sessions are created automatically for each new batch
 - Go back to step 3
@@ -134,15 +155,15 @@ Based on feedback:
 Feedback is proposal-centric — each mockup with feedback gets its own section:
 
 ```
-### 1. Design Name  [👍]
+### Warm Editorial  [👍]
 Love the dark palette, serif typography works well
 
-### 3. Another Design  [👎]
+### Dense Dashboard  [👎]
 Too busy, hard to read
 
 ### No feedback
-- 2. Minimal Modern
-- 4. Editorial Magazine
+- Minimal Cards
+- Retro Brutalist
 ```
 
 - **👍 = strong positive** — build on these directions
