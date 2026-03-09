@@ -110,7 +110,7 @@
       border-bottom: 1px solid #eee;
     }
     .slide-content iframe {
-      width: 100%; border: none; display: block; min-height: 200px;
+      width: 100%; border: none; display: block; min-height: max(600px, 80vh);
     }
 
     /* ── Bottom bar ──────────────────────────── */
@@ -243,6 +243,7 @@
     let knownWorkspaces = [];    // [{id, projectName, branch, mockups, lastActive}]
     let notesActive = false;
     let recording = false;
+    let hasUserSelectedSession = false;
 
     // ── DOM refs ─────────────────────────────────
     const $ = (s) => document.getElementById(s);
@@ -923,12 +924,29 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         return;
       }
 
+      // Auto-select latest session until user manually clicks a tab
+      if (!hasUserSelectedSession && sessionIds.length > 1) {
+        const latest = sessionIds[sessionIds.length - 1];
+        if (currentSession !== latest) {
+          currentSession = latest;
+          currentIndex = 0;
+          goTo(0);
+        }
+      }
+
+      // Validate current session still exists
+      if (currentSession !== null && !sessionIds.includes(currentSession)) {
+        currentSession = sessionIds[sessionIds.length - 1];
+        currentIndex = 0;
+        goTo(0);
+      }
+
       sessionsEl.innerHTML = '';
 
       const allPill = document.createElement('button');
       allPill.className = 'session-pill' + (currentSession === null ? ' active' : '');
       allPill.textContent = 'All';
-      allPill.onclick = () => { currentSession = null; currentIndex = 0; goTo(0); updateSessionPills(); };
+      allPill.onclick = () => { hasUserSelectedSession = true; currentSession = null; currentIndex = 0; goTo(0); updateSessionPills(); };
       sessionsEl.appendChild(allPill);
 
       for (const s of sessionIds) {
@@ -936,6 +954,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         pill.className = 'session-pill' + (currentSession === s ? ' active' : '');
         pill.textContent = `Round ${s}`;
         pill.onclick = () => {
+          hasUserSelectedSession = true;
           currentSession = currentSession === s ? null : s;
           currentIndex = 0;
           goTo(0);

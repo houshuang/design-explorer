@@ -6,7 +6,7 @@ user_invocable: true
 
 # Design Explorer
 
-Generate many diverse design mockups as HTML fragments. A global singleton server serves a full-screen keyboard-driven carousel with thumbs voting, notes, and optional voice recording. Feedback is written to a file that Claude can watch — no clipboard paste needed.
+Generate many diverse design mockups as HTML fragments. A global singleton server serves a full-screen keyboard-driven carousel with thumbs voting, notes, and optional voice recording. User submits feedback (copied to clipboard) and pastes it back.
 
 ## Trigger
 
@@ -128,17 +128,10 @@ Browse the full set at https://lucide.dev/icons
 
 Tell the user:
 1. The mockups are live at `http://localhost:10000` (always the same URL)
-2. Use arrow keys to navigate, up/down to vote, Tab for notes, C to submit feedback
-3. Feedback is automatically written to `{working_dir}/mockups/feedback.md`
+2. Use arrow keys to navigate, up/down to vote, Tab for notes, C to submit feedback (copies to clipboard)
+3. Paste the feedback back here when ready
 
-Then **watch for the feedback file**:
-```bash
-# Wait for feedback.md to appear or be updated
-while [ ! -f {working_dir}/mockups/feedback.md ] || [ "$(cat {working_dir}/mockups/feedback.md 2>/dev/null)" = "$LAST_FEEDBACK" ]; do sleep 2; done
-LAST_FEEDBACK=$(cat {working_dir}/mockups/feedback.md)
-```
-
-Read the feedback file when it appears and iterate. Do NOT ask the user to paste — the file contains the full feedback.
+Wait for the user to paste their feedback before proceeding.
 
 ### 4. Iterate
 
@@ -176,7 +169,7 @@ Too busy, hard to read
 
 - **Global singleton**: One server on port 10000 serves all projects. Each project registers as a workspace with its own tab in the UI.
 - **Auto-sessions**: The server automatically creates session boundaries when it detects batches of new files. No need to manually mark sessions.
-- **Feedback file**: When the user presses C (or clicks Submit), feedback is written to `{mockupDir}/feedback.md` AND copied to clipboard. Claude watches the file.
+- **Feedback**: When the user presses C (or clicks Submit), feedback is copied to clipboard. The user pastes it back into the conversation.
 - **Isolation**: Each mockup renders in its own iframe. CSS and JS cannot leak between mockups or break the carousel UI.
 - **Auto-height**: Iframes auto-resize to match their content height.
 - **Live updates**: When you edit a mockup file, the iframe reloads with updated content.
