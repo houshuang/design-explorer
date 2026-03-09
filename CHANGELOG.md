@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-03-09 — Descriptive Mockup Names + Clean-Slate Default
+
+### Problem
+Mockups used generic sequential names (`mockup-1.html`, `mockup-2.html`) that collided across sessions, causing write errors. Claude then had to read old files to find available names, wasting time. Old mockups accumulated in the carousel across sessions, making review noisy.
+
+### Solution
+- **Descriptive slug names**: `mockup-warm-editorial.html`, `mockup-dense-dashboard.html` — inherently unique and self-documenting
+- **Clean-slate default**: Before generating, delete old mockups + reset sessions.json. Previous mockups are kept only if the user explicitly asks
+- **Scan before generating**: `ls` the mockups directory before writing to avoid collisions even when cleanup is skipped
+
+### Files Changed
+- `SKILL.md` — New naming convention, cleanup step, updated examples throughout
+
+---
+
 ## 2026-03-08 — Global Singleton Server + Workspace Model
 
 ### Problem

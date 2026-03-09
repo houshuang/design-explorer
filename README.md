@@ -98,7 +98,7 @@ If no key is found, voice is silently disabled and the mic button is hidden. Eve
 
 **Global singleton server**: One server on port 10000 serves all projects. Each Claude instance registers a workspace (project path + optional branch). The browser shows a tab bar for switching between workspaces.
 
-**Fragment architecture**: Each mockup is a standalone HTML file (`<section>` with scoped styles). Each mockup renders inside an **isolated iframe** with pre-loaded resources (Tailwind CSS, 11 Google Fonts, Lucide icons). Claude writes small focused fragments, not monolithic pages.
+**Fragment architecture**: Each mockup is a standalone HTML file with a descriptive slug name (`mockup-warm-editorial.html`, `mockup-dense-dashboard.html`). Each renders inside an **isolated iframe** with pre-loaded resources (Tailwind CSS, 11 Google Fonts, Lucide icons). Claude writes small focused fragments, not monolithic pages. Old mockups are cleaned up by default before each new session.
 
 **Iframe isolation**: CSS and JS cannot leak between mockups or break the carousel. A broken mockup cannot crash the page.
 
