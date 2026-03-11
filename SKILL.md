@@ -24,11 +24,19 @@ Before generating mockups, check for design context in the project:
 
 ### 1. Register with the server
 
+Mockups are stored in a **centralized location** under `~/.claude/design-explorer/mockups/`, organized by git repo name. This ensures all mockups are findable regardless of which subdirectory Claude is invoked from.
+
 ```bash
-mkdir -p {working_dir}/mockups
-WORKSPACE_ID=$(~/.claude/skills/design-explorer/bin/register \
-  --project "{working_dir}" --dir "{working_dir}/mockups")
+PROJECT_NAME=$(cd "{working_dir}" && basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || basename "{working_dir}")
+MOCKUP_DIR="$HOME/.claude/design-explorer/mockups/$PROJECT_NAME"
+mkdir -p "$MOCKUP_DIR"
+REGISTER_OUTPUT=$(~/.claude/skills/design-explorer/bin/register \
+  --project "{working_dir}" --dir "$MOCKUP_DIR" 2>/dev/null)
+# The register script prints the workspace ID on stdout
+WORKSPACE_ID="$REGISTER_OUTPUT"
 ```
+
+Save the `WORKSPACE_ID` — you'll need it for batch signaling in step 2.
 
 This starts the server if not running (always port 10000), registers a workspace, and opens the browser on first registration. If another project is already using the server, this project gets a separate tab in the UI.
 
@@ -38,14 +46,14 @@ The server URL is always `http://localhost:10000`.
 
 **Before generating, check for existing mockup files:**
 ```bash
-ls {working_dir}/mockups/*.html 2>/dev/null
+ls "$MOCKUP_DIR"/*.html 2>/dev/null
 ```
 
 If there are old mockups from previous sessions, **remove them** so the carousel starts clean. Don't read them — just delete them. Also reset sessions.json:
 ```bash
-rm -f {working_dir}/mockups/*.html
-echo '[]' > {working_dir}/mockups/sessions.json
-rm -f {working_dir}/mockups/feedback.md
+rm -f "$MOCKUP_DIR"/*.html
+echo '[]' > "$MOCKUP_DIR"/sessions.json
+rm -f "$MOCKUP_DIR"/feedback.md
 ```
 
 If the user explicitly asks to keep previous mockups (e.g., to iterate on them), skip the cleanup. But the default is a clean slate — old mockups clutter the carousel and slow down review.
@@ -70,7 +78,7 @@ A mockup file is a `<section>` wrapper — no `<html>`, `<head>`, or boilerplate
 
 **Write mockups in batches of 5** — each is an independent file. Write 5 in parallel, then another 5. Writing all 10 in one parallel blast can exceed output token limits and crash the response.
 
-**Sessions are automatic.** The server detects new file batches and creates sessions (rounds) automatically. No need to call any session endpoint.
+All mockup files written before the user submits feedback (presses C in the UI) are grouped into one session/round automatically. No batch signaling needed — the server tracks an "open session" that collects all new files until the user submits feedback, which closes it. The next batch of files then starts a new session.
 
 ### What's available inside each mockup
 
@@ -138,9 +146,8 @@ Wait for the user to paste their feedback before proceeding.
 Based on feedback:
 - **Edit** a specific mockup: read + edit its file (e.g., `mockup-warm-editorial.html`)
 - **Remove** a thumbs-down mockup: delete its file
-- **Add** new variants: write new `mockup-{descriptive-slug}.html` files (scan existing files first to avoid name collisions)
+- **Add** new variants: wrap in batch signals (`batch/start` → write files → `batch/end`), scan existing files first to avoid name collisions
 - The browser updates live on every file change — no reload
-- Sessions are created automatically for each new batch
 - Go back to step 3
 
 ### Interpreting feedback
@@ -168,7 +175,7 @@ Too busy, hard to read
 ## Technical notes
 
 - **Global singleton**: One server on port 10000 serves all projects. Each project registers as a workspace with its own tab in the UI.
-- **Auto-sessions**: The server automatically creates session boundaries when it detects batches of new files. No need to manually mark sessions.
+- **Session lifecycle**: All files go into the current "open session". When the user submits feedback (C key), the session closes. Next files automatically start a new session. No batch signaling needed.
 - **Feedback**: When the user presses C (or clicks Submit), feedback is copied to clipboard. The user pastes it back into the conversation.
 - **Isolation**: Each mockup renders in its own iframe. CSS and JS cannot leak between mockups or break the carousel UI.
 - **Auto-height**: Iframes auto-resize to match their content height.

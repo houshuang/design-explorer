@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-03-11 — Feedback-Driven Sessions (replaces batch signaling)
+
+### Problem
+Session management relied on Claude correctly calling `batch/start` → `batch/end` and a 5-minute debounce timer as fallback. In practice this failed often: Claude forgot `batch/end`, context compaction interrupted mid-batch, or files written minutes apart got split into separate rounds. Cross-project session IDs leaked into pill labels (e.g., "Round 12, 13, 14, 15" in a project that only had 2 rounds). Mockups appeared in "All" but not in any round pill because they had `session: 0`.
+
+### Solution
+- **Feedback closes sessions**: When the user presses C (submit feedback), the server closes the current session. All files arriving after that start a new session. No timers, no batch coordination needed.
+- **Open session model**: New files always go into the "open session" (created on demand). `getOrCreateOpenSession()` replaces `autoCreateSession()`.
+- **Workspace-scoped pills**: Session pills now filter by current workspace, preventing cross-project ID leakage. Display uses sequential numbering (`Round 1, 2, 3`) regardless of internal IDs.
+- **Auto-focus**: Client auto-switches to the workspace/session with the most recent file additions (after initial load).
+- **Auto-reset on cleanup**: When all `.html` files are deleted, sessions reset to `[]` automatically.
+- **Server sends `init-complete` event**: Client distinguishes initial load from runtime file additions, preventing spurious workspace switching on connect.
+
+### Files Changed
+- `assets/server.js` — Replaced `autoCreateSession` + timers with `getOrCreateOpenSession`, feedback endpoint closes sessions, `init-complete` SSE event, workspace reset on empty
+- `assets/harness-template.html` — Workspace-scoped session pills, sequential pill numbering, auto-focus on `add` events, `session-closed` + `init-complete` event handlers
+- `SKILL.md` — Removed batch signaling instructions, documented feedback-driven session lifecycle
+
+---
+
+## 2026-03-09 — Batch Signaling to Fix Session Scattering
+
+### Problem
+Mockups got split across multiple sessions (rounds) because the 60s auto-session debounce timer fired between batches of 5 writes. Claude writes mockups in batches of 5 (to avoid token limits), but inter-batch gaps (tool approval, generation time) often exceed 60s. Evidence: petrarca had 10 rounds where rounds 3+4, and 8+9+10 should each have been single rounds.
+
+### Solution
+- **Batch signaling**: New `POST /workspace/:id/batch/start` and `batch/end` endpoints. Claude signals batch start before writing any mockups, and batch end after all are written. During batching, auto-session timer is suppressed.
+- **`batch/end` creates session immediately** — no waiting for debounce. All unassigned mockups are grouped into one session.
+- **Fallback debounce increased to 5 minutes** (was 60s) — only fires if Claude forgets to signal batch end.
+- **SKILL.md updated** with batch signaling instructions around mockup writes and during iteration.
+
+### Files Changed
+- `assets/server.js` — `batching` flag on workspace, `batch/start` + `batch/end` endpoints, 5-min fallback debounce
+- `SKILL.md` — Batch signal workflow, workspace ID capture from register, updated iteration + technical notes
+
+---
+
 ## 2026-03-09 — Descriptive Mockup Names + Clean-Slate Default
 
 ### Problem

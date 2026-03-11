@@ -59,7 +59,7 @@ function sessionForMockup(ws, mockupId) {
   for (const s of ws.sessions) {
     if (s.mockups.includes(mockupId)) return s.id;
   }
-  return ws.sessions.length > 0 ? ws.sessions[ws.sessions.length - 1].id : 0;
+  return null;
 }
 
 function saveSessions(ws) {
@@ -71,26 +71,20 @@ function saveSessions(ws) {
   } catch {}
 }
 
-function autoCreateSession(ws) {
-  const allIds = [...ws.knownFiles.keys()].map(f => f.replace('.html', ''));
-  const previousIds = new Set(ws.sessions.flatMap(s => s.mockups));
-  const newIds = allIds.filter(id => !previousIds.has(id));
-  if (newIds.length === 0) return null;
-
+function getOrCreateOpenSession(ws) {
+  if (ws.openSessionId !== null) {
+    const session = ws.sessions.find(s => s.id === ws.openSessionId);
+    if (session && !session.closed) return session;
+  }
   const session = {
     id: ws.nextSession++,
     created: new Date().toISOString(),
-    mockups: newIds,
+    mockups: [],
+    closed: false,
   };
   ws.sessions.push(session);
+  ws.openSessionId = session.id;
   saveSessions(ws);
-
-  for (const mockupId of newIds) {
-    const file = mockupId + '.html';
-    const data = ws.knownFiles.get(file);
-    if (data) data.session = session.id;
-  }
-
   broadcastToWorkspace(ws.id, 'session', { ...session, workspace: ws.id });
   return session;
 }
@@ -102,7 +96,6 @@ function scanWorkspace(ws) {
 
   const currentFiles = new Set(files);
   const changes = [];
-  let hasNewFiles = false;
 
   for (const file of files) {
     const filePath = path.join(ws.mockupDir, file);
@@ -113,10 +106,17 @@ function scanWorkspace(ws) {
     if (!existing) {
       const html = fs.readFileSync(filePath, 'utf8');
       const id = file.replace('.html', '');
-      const session = sessionForMockup(ws, id);
-      ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session });
-      changes.push({ type: 'add', id, html, session, workspace: ws.id });
-      hasNewFiles = true;
+      let sessionId = sessionForMockup(ws, id);
+      if (sessionId === null) {
+        const session = getOrCreateOpenSession(ws);
+        if (!session.mockups.includes(id)) {
+          session.mockups.push(id);
+          saveSessions(ws);
+        }
+        sessionId = session.id;
+      }
+      ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session: sessionId });
+      changes.push({ type: 'add', id, html, session: sessionId, workspace: ws.id });
     } else if (stat.mtimeMs > existing.mtime) {
       const html = fs.readFileSync(filePath, 'utf8');
       ws.knownFiles.set(file, { ...existing, mtime: stat.mtimeMs, html });
@@ -131,15 +131,12 @@ function scanWorkspace(ws) {
     }
   }
 
-  // Auto-session: batch new files, create session after 60s of quiet.
-  // 60s debounce handles sequential writes where each mockup takes 5-20s to generate.
-  // The timer resets with every new file, so it only fires 60s after the LAST file.
-  if (hasNewFiles) {
-    ws.lastFileAdd = Date.now();
-    if (ws.autoSessionTimer) clearTimeout(ws.autoSessionTimer);
-    ws.autoSessionTimer = setTimeout(() => {
-      autoCreateSession(ws);
-    }, 60000);
+  // Reset sessions when all mockups are deleted (clean start)
+  if (ws.knownFiles.size === 0 && ws.sessions.length > 0) {
+    ws.sessions = [];
+    ws.nextSession = 1;
+    ws.openSessionId = null;
+    saveSessions(ws);
   }
 
   ws.lastActive = Date.now();
@@ -175,7 +172,6 @@ function stopWatching(ws) {
   if (ws.watcher) { ws.watcher.close(); ws.watcher = null; }
   if (ws.pollTimer) { clearInterval(ws.pollTimer); ws.pollTimer = null; }
   if (ws.slowPollTimer) { clearInterval(ws.slowPollTimer); ws.slowPollTimer = null; }
-  if (ws.autoSessionTimer) { clearTimeout(ws.autoSessionTimer); ws.autoSessionTimer = null; }
 }
 
 function createWorkspace(projectPath, branch, mockupDir) {
@@ -204,7 +200,8 @@ function createWorkspace(projectPath, branch, mockupDir) {
     lastActive: Date.now(),
     watcher: null, watchTimeout: null, watchWorking: false,
     pollTimer: null, slowPollTimer: null,
-    lastFileAdd: 0, autoSessionTimer: null,
+    openSessionId: null,
+    batching: false,
   };
 
   // Load existing sessions
@@ -212,6 +209,10 @@ function createWorkspace(projectPath, branch, mockupDir) {
     ws.sessions = JSON.parse(fs.readFileSync(path.join(ws.mockupDir, 'sessions.json'), 'utf8'));
     ws.nextSession = ws.sessions.length > 0
       ? Math.max(...ws.sessions.map(s => s.id)) + 1 : 1;
+    const lastSession = ws.sessions[ws.sessions.length - 1];
+    if (lastSession && !lastSession.closed) {
+      ws.openSessionId = lastSession.id;
+    }
   } catch {}
 
   startWatching(ws);
@@ -310,6 +311,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    res.write(`event: init-complete\ndata: {}\n\n`);
+
     const client = { res, workspaceId: wsId || null };
     clients.push(client);
     req.on('close', () => {
@@ -343,12 +346,32 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
 
+  // ── Batch start (suppress auto-session during writes) ──
+  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/batch\/start$/)) {
+    const id = decodeURIComponent(url.pathname.split('/')[2]);
+    const ws = workspaces.get(id);
+    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
+    ws.batching = true;
+    ws.lastActive = Date.now();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ batching: true }));
+
+  // ── Batch end (create session immediately with all unassigned mockups) ──
+  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/batch\/end$/)) {
+    const id = decodeURIComponent(url.pathname.split('/')[2]);
+    const ws = workspaces.get(id);
+    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
+    ws.batching = false;
+    ws.lastActive = Date.now();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+
   // ── Create session (scoped to workspace) ──────
   } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/session$/)) {
     const id = decodeURIComponent(url.pathname.split('/')[2]);
     const ws = workspaces.get(id);
     if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    const session = autoCreateSession(ws);
+    const session = getOrCreateOpenSession(ws);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(session || {}));
 
@@ -361,6 +384,16 @@ const server = http.createServer(async (req, res) => {
     const feedbackPath = path.join(ws.mockupDir, 'feedback.md');
     try {
       fs.writeFileSync(feedbackPath, body.content || '');
+      // Close current session — next files start a new round
+      if (ws.openSessionId !== null) {
+        const session = ws.sessions.find(s => s.id === ws.openSessionId);
+        if (session) {
+          session.closed = true;
+          saveSessions(ws);
+          broadcastToWorkspace(ws.id, 'session-closed', { id: session.id, workspace: ws.id });
+        }
+        ws.openSessionId = null;
+      }
       ws.lastActive = Date.now();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ path: feedbackPath }));
@@ -388,7 +421,7 @@ const server = http.createServer(async (req, res) => {
   } else if (req.method === 'POST' && url.pathname === '/session') {
     const ws = [...workspaces.values()][0];
     if (!ws) { res.writeHead(404); res.end('No workspaces'); return; }
-    const session = autoCreateSession(ws);
+    const session = getOrCreateOpenSession(ws);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(session || {}));
 

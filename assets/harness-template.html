@@ -244,6 +244,7 @@
     let notesActive = false;
     let recording = false;
     let hasUserSelectedSession = false;
+    let initialized = false;
 
     // ── DOM refs ─────────────────────────────────
     const $ = (s) => document.getElementById(s);
@@ -751,7 +752,19 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
     function connectSSE() {
       const es = new EventSource('/events');
 
-      es.addEventListener('add', (e) => addMockup(JSON.parse(e.data)));
+      es.addEventListener('add', (e) => {
+        const data = JSON.parse(e.data);
+        addMockup(data);
+        // Auto-focus: switch to workspace/session with most recent file addition
+        if (initialized && data.workspace && data.workspace !== currentWorkspace) {
+          currentWorkspace = data.workspace;
+          hasUserSelectedSession = false;
+          currentIndex = 0;
+          goTo(0);
+          updateWorkspaceTabs();
+          updateSessionPills();
+        }
+      });
       es.addEventListener('update', (e) => updateMockupContent(JSON.parse(e.data)));
       es.addEventListener('remove', (e) => removeMockup(JSON.parse(e.data).id));
       es.addEventListener('workspaces', (e) => {
@@ -780,6 +793,8 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         }
         updateWorkspaceTabs();
       });
+      es.addEventListener('init-complete', () => { initialized = true; });
+      es.addEventListener('session-closed', () => { hasUserSelectedSession = false; });
       es.addEventListener('session', (e) => {
         const data = JSON.parse(e.data);
         // Update mockup session assignments
@@ -917,7 +932,9 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
 
     // ── Sessions ─────────────────────────────────
     function updateSessionPills() {
-      const sessionIds = [...new Set(mockups.map(m => m.session).filter(Boolean))].sort((a,b) => a-b);
+      const wsMockups = currentWorkspace !== null
+        ? mockups.filter(m => m.workspace === currentWorkspace) : mockups;
+      const sessionIds = [...new Set(wsMockups.map(m => m.session).filter(Boolean))].sort((a,b) => a-b);
       if (sessionIds.length <= 1) {
         sessionsEl.innerHTML = '';
         currentSession = null;
@@ -949,10 +966,11 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       allPill.onclick = () => { hasUserSelectedSession = true; currentSession = null; currentIndex = 0; goTo(0); updateSessionPills(); };
       sessionsEl.appendChild(allPill);
 
-      for (const s of sessionIds) {
+      for (let i = 0; i < sessionIds.length; i++) {
+        const s = sessionIds[i];
         const pill = document.createElement('button');
         pill.className = 'session-pill' + (currentSession === s ? ' active' : '');
-        pill.textContent = `Round ${s}`;
+        pill.textContent = `Round ${i + 1}`;
         pill.onclick = () => {
           hasUserSelectedSession = true;
           currentSession = currentSession === s ? null : s;

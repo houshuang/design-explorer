@@ -17,7 +17,9 @@ https://github.com/user-attachments/assets/placeholder — TODO: add demo gif
 
 **Global singleton**: One server on port 10000 serves all projects. Multiple Claude instances in different projects each register a workspace and get their own tab in the browser UI — no port conflicts, no confusion.
 
-**Auto-sessions**: The server detects batches of new mockup files and creates session boundaries automatically. No manual session management needed.
+**Feedback-driven sessions**: All mockups written before you submit feedback belong to one round. When you press `C` (submit), the session closes — any new mockups from Claude's next iteration automatically start a new round. No manual session management needed.
+
+**Auto-focus**: The browser automatically switches to the workspace and session with the most recent file additions.
 
 **Feedback file**: When you submit feedback, it's written to `{mockupDir}/feedback.md` AND copied to clipboard. Claude watches the file — no need to paste.
 
@@ -104,9 +106,7 @@ If no key is found, voice is silently disabled and the mic button is hidden. Eve
 
 **Pre-loaded harness**: Every iframe includes Tailwind CSS (full JIT), 11 Google Fonts (Inter, DM Sans, Space Grotesk, Syne, Cormorant Garamond, EB Garamond, Crimson Pro, Playfair Display, Instrument Serif, JetBrains Mono, Space Mono), and Lucide icons — so mockups stay compact and token-efficient.
 
-**Auto-sessions**: The server watches for new mockup files and creates session boundaries automatically (60s debounce — the timer resets with each new file, so it only fires 60s after the last file in a batch). This handles both parallel and sequential mockup generation.
-
-**Feedback file**: When the user presses `C` (Submit), feedback for the current session is POSTed to the server, which writes it to `{mockupDir}/feedback.md`. Claude watches this file — no clipboard paste needed.
+**Feedback-driven sessions**: All new mockup files go into the current "open session." When the user presses `C` (Submit), the session closes and feedback is written to `{mockupDir}/feedback.md`. Any new files arriving after that automatically start a new session. No timers or batch coordination needed — the user's feedback action is the natural session boundary. The UI auto-focuses on the workspace and session with the most recent activity.
 
 **PID management**: Server writes `~/.claude/design-explorer.pid`. Idle shutdown after 30 min with no registered workspaces.
 
