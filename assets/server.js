@@ -6,7 +6,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 
 // ── Config ──────────────────────────────────────
 const args = process.argv.slice(2);
@@ -44,6 +44,8 @@ const SONIOX_KEY = loadSonioxKey();
 // ── Workspace Registry ──────────────────────────
 const workspaces = new Map(); // id → Workspace
 const clients = [];           // [{res, workspaceId}]
+const chatHistories = new Map(); // workspaceId → [{id, role, content, mockupId, context, timestamp}]
+let nextChatId = 1;
 
 function makeWorkspaceId(projectPath, branch) {
   const name = path.basename(projectPath);
@@ -69,6 +71,170 @@ function saveSessions(ws) {
       JSON.stringify(ws.sessions, null, 2)
     );
   } catch {}
+}
+
+function loadChatHistory(ws) {
+  if (chatHistories.has(ws.id)) return chatHistories.get(ws.id);
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(ws.mockupDir, 'chat-history.json'), 'utf8'));
+    chatHistories.set(ws.id, data);
+    if (data.length > 0) {
+      const maxId = Math.max(...data.map(m => parseInt(m.id.split('-')[1] || '0', 10)));
+      if (maxId >= nextChatId) nextChatId = maxId + 1;
+    }
+    return data;
+  } catch {
+    chatHistories.set(ws.id, []);
+    return [];
+  }
+}
+
+function saveChatHistory(ws) {
+  const history = chatHistories.get(ws.id) || [];
+  try {
+    fs.writeFileSync(
+      path.join(ws.mockupDir, 'chat-history.json'),
+      JSON.stringify(history, null, 2)
+    );
+  } catch {}
+}
+
+function addChatMessage(ws, role, content, mockupId, context) {
+  const history = loadChatHistory(ws);
+  const msg = {
+    id: `chat-${nextChatId++}`,
+    role,
+    content,
+    mockupId: mockupId || null,
+    context: context || null,
+    timestamp: new Date().toISOString(),
+  };
+  history.push(msg);
+  saveChatHistory(ws);
+  return msg;
+}
+
+// ── AI auto-response via Claude Code CLI ─────────
+const activeResponses = new Map(); // wsId → child process
+
+function respondWithClaude(ws, userMsg) {
+  // Don't respond to assistant messages or if already responding
+  if (userMsg.role !== 'user') return;
+  if (activeResponses.has(ws.id)) {
+    // Kill previous response if a new question comes in
+    try { activeResponses.get(ws.id).kill(); } catch {}
+  }
+
+  // Gather context
+  const mockupFile = userMsg.mockupId ? userMsg.mockupId + '.html' : null;
+  const mockupHtml = mockupFile && ws.knownFiles.has(mockupFile)
+    ? ws.knownFiles.get(mockupFile).html : '';
+
+  const history = loadChatHistory(ws);
+  const threadHistory = history
+    .filter(m => m.mockupId === userMsg.mockupId && m.id !== userMsg.id)
+    .slice(-20) // last 20 messages for context window
+    .map(m => `<${m.role}>\n${m.content}\n</${m.role}>`)
+    .join('\n\n');
+
+  // List all mockups for cross-reference
+  const mockupList = [...ws.knownFiles.keys()]
+    .map(f => f.replace('.html', ''))
+    .join(', ');
+
+  const systemPrompt = `You are an AI assistant integrated into a Design Explorer tool. You help review and analyze design mockups — answering questions about design choices, code patterns, visual decisions, and suggesting improvements.
+
+## Current context
+- Project: ${ws.projectPath}
+- Branch: ${ws.branch}
+- Current mockup: ${userMsg.mockupId || 'none'}
+- All mockups in session: ${mockupList}
+
+${mockupHtml ? `## Current mockup HTML\n\`\`\`html\n${mockupHtml}\n\`\`\`` : ''}
+
+${threadHistory ? `## Conversation history for this thread\n${threadHistory}` : ''}
+
+## Instructions
+- Answer questions about the mockup's design: typography, colors, layout, components, interactions
+- When referencing code, cite specific files and line numbers
+- Use the tools available to explore the project codebase, git history, and related files
+- Keep responses concise and actionable — this is a review context, not a tutorial
+- Format with markdown: use code blocks, bold for emphasis, lists for comparisons`;
+
+  // Broadcast typing indicator
+  broadcastToWorkspace(ws.id, 'chat_typing', {
+    type: 'chat_typing', active: true, workspace: ws.id,
+  });
+
+  const streamMsgId = `chat-${nextChatId++}`;
+  let fullContent = '';
+  let buffer = '';
+
+  const proc = spawn('claude', [
+    '-p', userMsg.content,
+    '-s', systemPrompt,
+    '--output-format', 'text',
+    '--allowedTools', 'Read,Grep,Glob,Bash(git log:git diff:git show:git blame:ls)',
+  ], {
+    cwd: ws.projectPath,
+    env: { ...process.env, TERM: 'dumb' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  activeResponses.set(ws.id, proc);
+
+  proc.stdout.on('data', (chunk) => {
+    const text = chunk.toString();
+    fullContent += text;
+    broadcastToWorkspace(ws.id, 'chat_stream', {
+      type: 'chat_stream',
+      messageId: streamMsgId,
+      chunk: text,
+      done: false,
+      mockupId: userMsg.mockupId,
+      workspace: ws.id,
+    });
+  });
+
+  proc.stderr.on('data', () => {}); // suppress stderr
+
+  proc.on('close', (code) => {
+    activeResponses.delete(ws.id);
+
+    // Stop typing indicator
+    broadcastToWorkspace(ws.id, 'chat_typing', {
+      type: 'chat_typing', active: false, workspace: ws.id,
+    });
+
+    if (fullContent.trim()) {
+      // Save the full response
+      const msg = addChatMessage(ws, 'assistant', fullContent.trim(), userMsg.mockupId);
+      broadcastToWorkspace(ws.id, 'chat_stream', {
+        type: 'chat_stream',
+        messageId: streamMsgId,
+        chunk: '',
+        done: true,
+        content: fullContent.trim(),
+        mockupId: userMsg.mockupId,
+        workspace: ws.id,
+      });
+      // Also broadcast as regular message for history
+      broadcastToWorkspace(ws.id, 'chat_message', {
+        type: 'chat_message', ...msg, workspace: ws.id,
+      });
+    } else if (code !== 0) {
+      // Send error message
+      const errMsg = addChatMessage(ws, 'assistant',
+        '_Failed to get a response. Make sure `claude` CLI is available and you\'re logged in._',
+        userMsg.mockupId);
+      broadcastToWorkspace(ws.id, 'chat_message', {
+        type: 'chat_message', ...errMsg, workspace: ws.id,
+      });
+    }
+  });
+
+  // Close stdin immediately (non-interactive mode)
+  proc.stdin.end();
 }
 
 function getOrCreateOpenSession(ws) {
@@ -309,6 +475,11 @@ const server = http.createServer(async (req, res) => {
       for (const session of ws.sessions) {
         res.write(`event: session\ndata: ${JSON.stringify({ ...session, workspace: id })}\n\n`);
       }
+      // Send existing chat history
+      const chatHistory = loadChatHistory(ws);
+      if (chatHistory.length > 0) {
+        res.write(`event: chat_history\ndata: ${JSON.stringify({ workspace: id, messages: chatHistory })}\n\n`);
+      }
     }
 
     res.write(`event: init-complete\ndata: {}\n\n`);
@@ -401,6 +572,126 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: e.message }));
     }
+
+  // ── Chat: send message ───────────────────────
+  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/chat$/)) {
+    const id = decodeURIComponent(url.pathname.split('/')[2]);
+    const ws = workspaces.get(id);
+    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
+    const body = await readBody(req);
+    if (!body.message) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'message required' }));
+      return;
+    }
+    const msg = addChatMessage(ws, 'user', body.message, body.mockupId, body.context);
+    broadcastToWorkspace(ws.id, 'chat_message', {
+      type: 'chat_message', ...msg, workspace: ws.id,
+    });
+    ws.lastActive = Date.now();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(msg));
+
+    // Auto-respond with Claude Code CLI
+    respondWithClaude(ws, msg);
+
+  // ── Chat: get history ──────────────────────────
+  } else if (req.method === 'GET' && url.pathname.match(/^\/workspace\/[^/]+\/chat$/)) {
+    const id = decodeURIComponent(url.pathname.split('/')[2]);
+    const ws = workspaces.get(id);
+    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
+    const history = loadChatHistory(ws);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(history));
+
+  // ── Chat: post response to a message ───────────
+  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/chat\/[^/]+\/respond$/)) {
+    const parts = url.pathname.split('/');
+    const id = decodeURIComponent(parts[2]);
+    const messageId = decodeURIComponent(parts[4]);
+    const ws = workspaces.get(id);
+    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
+    const body = await readBody(req);
+    const role = body.role || 'assistant';
+    const msg = addChatMessage(ws, role, body.content || '', body.mockupId);
+    msg.inReplyTo = messageId;
+    saveChatHistory(ws);
+    broadcastToWorkspace(ws.id, 'chat_message', {
+      type: 'chat_message', ...msg, workspace: ws.id,
+    });
+    ws.lastActive = Date.now();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(msg));
+
+  // ── Chat: stream a chunk (for progressive responses) ──
+  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/chat\/stream$/)) {
+    const id = decodeURIComponent(url.pathname.split('/')[2]);
+    const ws = workspaces.get(id);
+    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
+    const body = await readBody(req);
+    // body: {messageId, chunk, done}
+    broadcastToWorkspace(ws.id, 'chat_stream', {
+      type: 'chat_stream',
+      messageId: body.messageId || null,
+      chunk: body.chunk || '',
+      done: !!body.done,
+      workspace: ws.id,
+    });
+    // If done and there's a full content, save it
+    if (body.done && body.content) {
+      const msg = addChatMessage(ws, 'assistant', body.content, body.mockupId);
+      msg.inReplyTo = body.messageId;
+      saveChatHistory(ws);
+    }
+    ws.lastActive = Date.now();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+
+  // ── Chat: typing indicator ─────────────────────
+  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/chat\/typing$/)) {
+    const id = decodeURIComponent(url.pathname.split('/')[2]);
+    const ws = workspaces.get(id);
+    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
+    const body = await readBody(req);
+    broadcastToWorkspace(ws.id, 'chat_typing', {
+      type: 'chat_typing',
+      active: !!body.active,
+      workspace: ws.id,
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+
+  // ── Context: gather workspace context for AI ───
+  } else if (req.method === 'GET' && url.pathname.match(/^\/workspace\/[^/]+\/context$/)) {
+    const id = decodeURIComponent(url.pathname.split('/')[2]);
+    const ws = workspaces.get(id);
+    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
+
+    const mockupList = [];
+    for (const [file, data] of ws.knownFiles) {
+      mockupList.push({
+        id: file.replace('.html', ''),
+        filename: file,
+        session: data.session,
+        html: data.html,
+      });
+    }
+
+    const context = {
+      workspace: {
+        id: ws.id,
+        projectPath: ws.projectPath,
+        projectName: ws.projectName,
+        branch: ws.branch,
+        mockupDir: ws.mockupDir,
+      },
+      mockups: mockupList,
+      sessions: ws.sessions,
+      chatHistory: loadChatHistory(ws),
+    };
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(context));
 
   // ── Health check ──────────────────────────────
   } else if (req.method === 'GET' && url.pathname === '/health') {
