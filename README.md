@@ -1,8 +1,6 @@
 # Design Explorer
 
-A [Claude Code skill](https://docs.anthropic.com/en/docs/claude-code/skills) for iterative design exploration. Generate diverse HTML mockups, review them in a full-screen carousel, and give structured feedback with keyboard shortcuts.
-
-https://github.com/user-attachments/assets/placeholder — TODO: add demo gif
+A [Claude Code skill](https://code.claude.com/docs/en/skills) for iterative design exploration. Generate diverse HTML mockups, review them in a full-screen carousel, and give structured feedback with keyboard shortcuts.
 
 ## How it works
 
@@ -30,7 +28,9 @@ https://github.com/user-attachments/assets/placeholder — TODO: add demo gif
 git clone https://github.com/houshuang/design-explorer.git ~/.claude/skills/design-explorer
 ```
 
-That's it. The skill is now available as `/design-explorer` in Claude Code.
+That's it. The skill is now available as `/design-explorer` in Claude Code. A running session picks it up without a restart (unless `~/.claude/skills` itself is new, in which case restart once); run `/skills` to check that it is listed.
+
+Keep it in `~/.claude/skills/design-explorer`: the skill's instructions call its helper scripts at that path.
 
 ### Requirements
 
