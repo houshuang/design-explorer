@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Design Explorer — Global Singleton Server (zero dependencies)
-// Manages multiple workspaces, one per project/branch.
+// Manages multiple workspaces, one per mockup directory.
 // Usage: node server.js [--port 10000] [--no-open]
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { exec, spawn } = require('child_process');
+const crypto = require('crypto');
+const { exec } = require('child_process');
 
 // ── Config ──────────────────────────────────────
 const args = process.argv.slice(2);
@@ -15,15 +16,27 @@ function getArg(name, fallback) {
   return i !== -1 && args[i + 1] ? args[i + 1] : fallback;
 }
 const PORT = parseInt(getArg('port', '10000'), 10);
+const HOST = '127.0.0.1';
 const NO_OPEN = args.includes('--no-open');
 const HARNESS = path.join(__dirname, 'harness-template.html');
 const PID_FILE = path.join(process.env.HOME, '.claude', 'design-explorer.pid');
+const STATE_FILE = path.join(process.env.HOME, '.claude', 'design-explorer-workspaces.json');
+// Mockup directories must live under this root; anything else is refused at registration.
+const MOCKUP_ROOT = '/tmp/claude/design-explorer';
+const MAX_BODY = 1024 * 1024;
+
+const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
+const ALLOWED_ORIGINS = new Set([...ALLOWED_HOSTS].map(h => `http://${h}`));
+
+// bin/register compares this with the installed files and restarts a stale server.
+const SERVER_SRC = fs.readFileSync(__filename);
+const TEMPLATE_SRC = fs.readFileSync(HARNESS);
+const CODE_HASH = crypto.createHash('sha256').update(SERVER_SRC).update(TEMPLATE_SRC).digest('hex');
 
 // ── Legacy mode: if --dir is passed, run as single-workspace server ──
 const LEGACY_DIR = getArg('dir', null);
 
-// ── PID file ────────────────────────────────────
-try { fs.writeFileSync(PID_FILE, String(process.pid)); } catch {}
+// ── PID file (written once listening) ───────────
 function cleanup() { try { fs.unlinkSync(PID_FILE); } catch {} process.exit(0); }
 process.on('SIGTERM', cleanup);
 process.on('SIGINT', cleanup);
@@ -44,13 +57,31 @@ const SONIOX_KEY = loadSonioxKey();
 // ── Workspace Registry ──────────────────────────
 const workspaces = new Map(); // id → Workspace
 const clients = [];           // [{res, workspaceId}]
-const chatHistories = new Map(); // workspaceId → [{id, role, content, mockupId, context, timestamp}]
-let nextChatId = 1;
 
-function makeWorkspaceId(projectPath, branch) {
-  const name = path.basename(projectPath);
-  const clean = (branch || 'default').replace(/[^a-zA-Z0-9-]/g, '-');
-  return `${name}-${clean}`;
+// The id comes from the mockup directory, not the repo, so two sessions in the
+// same repo (each with its own directory) never share a workspace.
+function makeWorkspaceId(mockupDir) {
+  return path.relative(realRoot(), mockupDir)
+    .replace(/^mockups\//, '')
+    .replace(/[^a-zA-Z0-9-]/g, '-');
+}
+
+function realRoot() {
+  fs.mkdirSync(MOCKUP_ROOT, { recursive: true });
+  return fs.realpathSync(MOCKUP_ROOT);
+}
+
+// Returns the real path of an existing directory strictly inside MOCKUP_ROOT, or null.
+// realpath resolves symlinks and `..`, so neither can escape the root.
+function resolveMockupDir(dir) {
+  if (typeof dir !== 'string' || !dir) return null;
+  let real;
+  try {
+    real = fs.realpathSync(dir);
+    if (!fs.statSync(real).isDirectory()) return null;
+  } catch { return null; }
+  const root = realRoot();
+  return real.startsWith(root + path.sep) ? real : null;
 }
 
 function isMockup(f) {
@@ -71,170 +102,6 @@ function saveSessions(ws) {
       JSON.stringify(ws.sessions, null, 2)
     );
   } catch {}
-}
-
-function loadChatHistory(ws) {
-  if (chatHistories.has(ws.id)) return chatHistories.get(ws.id);
-  try {
-    const data = JSON.parse(fs.readFileSync(path.join(ws.mockupDir, 'chat-history.json'), 'utf8'));
-    chatHistories.set(ws.id, data);
-    if (data.length > 0) {
-      const maxId = Math.max(...data.map(m => parseInt(m.id.split('-')[1] || '0', 10)));
-      if (maxId >= nextChatId) nextChatId = maxId + 1;
-    }
-    return data;
-  } catch {
-    chatHistories.set(ws.id, []);
-    return [];
-  }
-}
-
-function saveChatHistory(ws) {
-  const history = chatHistories.get(ws.id) || [];
-  try {
-    fs.writeFileSync(
-      path.join(ws.mockupDir, 'chat-history.json'),
-      JSON.stringify(history, null, 2)
-    );
-  } catch {}
-}
-
-function addChatMessage(ws, role, content, mockupId, context) {
-  const history = loadChatHistory(ws);
-  const msg = {
-    id: `chat-${nextChatId++}`,
-    role,
-    content,
-    mockupId: mockupId || null,
-    context: context || null,
-    timestamp: new Date().toISOString(),
-  };
-  history.push(msg);
-  saveChatHistory(ws);
-  return msg;
-}
-
-// ── AI auto-response via Claude Code CLI ─────────
-const activeResponses = new Map(); // wsId → child process
-
-function respondWithClaude(ws, userMsg) {
-  // Don't respond to assistant messages or if already responding
-  if (userMsg.role !== 'user') return;
-  if (activeResponses.has(ws.id)) {
-    // Kill previous response if a new question comes in
-    try { activeResponses.get(ws.id).kill(); } catch {}
-  }
-
-  // Gather context
-  const mockupFile = userMsg.mockupId ? userMsg.mockupId + '.html' : null;
-  const mockupHtml = mockupFile && ws.knownFiles.has(mockupFile)
-    ? ws.knownFiles.get(mockupFile).html : '';
-
-  const history = loadChatHistory(ws);
-  const threadHistory = history
-    .filter(m => m.mockupId === userMsg.mockupId && m.id !== userMsg.id)
-    .slice(-20) // last 20 messages for context window
-    .map(m => `<${m.role}>\n${m.content}\n</${m.role}>`)
-    .join('\n\n');
-
-  // List all mockups for cross-reference
-  const mockupList = [...ws.knownFiles.keys()]
-    .map(f => f.replace('.html', ''))
-    .join(', ');
-
-  const systemPrompt = `You are an AI assistant integrated into a Design Explorer tool. You help review and analyze design mockups — answering questions about design choices, code patterns, visual decisions, and suggesting improvements.
-
-## Current context
-- Project: ${ws.projectPath}
-- Branch: ${ws.branch}
-- Current mockup: ${userMsg.mockupId || 'none'}
-- All mockups in session: ${mockupList}
-
-${mockupHtml ? `## Current mockup HTML\n\`\`\`html\n${mockupHtml}\n\`\`\`` : ''}
-
-${threadHistory ? `## Conversation history for this thread\n${threadHistory}` : ''}
-
-## Instructions
-- Answer questions about the mockup's design: typography, colors, layout, components, interactions
-- When referencing code, cite specific files and line numbers
-- Use the tools available to explore the project codebase, git history, and related files
-- Keep responses concise and actionable — this is a review context, not a tutorial
-- Format with markdown: use code blocks, bold for emphasis, lists for comparisons`;
-
-  // Broadcast typing indicator
-  broadcastToWorkspace(ws.id, 'chat_typing', {
-    type: 'chat_typing', active: true, workspace: ws.id,
-  });
-
-  const streamMsgId = `chat-${nextChatId++}`;
-  let fullContent = '';
-  let buffer = '';
-
-  const proc = spawn('claude', [
-    '-p', userMsg.content,
-    '-s', systemPrompt,
-    '--output-format', 'text',
-    '--allowedTools', 'Read,Grep,Glob,Bash(git log:git diff:git show:git blame:ls)',
-  ], {
-    cwd: ws.projectPath,
-    env: { ...process.env, TERM: 'dumb' },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  activeResponses.set(ws.id, proc);
-
-  proc.stdout.on('data', (chunk) => {
-    const text = chunk.toString();
-    fullContent += text;
-    broadcastToWorkspace(ws.id, 'chat_stream', {
-      type: 'chat_stream',
-      messageId: streamMsgId,
-      chunk: text,
-      done: false,
-      mockupId: userMsg.mockupId,
-      workspace: ws.id,
-    });
-  });
-
-  proc.stderr.on('data', () => {}); // suppress stderr
-
-  proc.on('close', (code) => {
-    activeResponses.delete(ws.id);
-
-    // Stop typing indicator
-    broadcastToWorkspace(ws.id, 'chat_typing', {
-      type: 'chat_typing', active: false, workspace: ws.id,
-    });
-
-    if (fullContent.trim()) {
-      // Save the full response
-      const msg = addChatMessage(ws, 'assistant', fullContent.trim(), userMsg.mockupId);
-      broadcastToWorkspace(ws.id, 'chat_stream', {
-        type: 'chat_stream',
-        messageId: streamMsgId,
-        chunk: '',
-        done: true,
-        content: fullContent.trim(),
-        mockupId: userMsg.mockupId,
-        workspace: ws.id,
-      });
-      // Also broadcast as regular message for history
-      broadcastToWorkspace(ws.id, 'chat_message', {
-        type: 'chat_message', ...msg, workspace: ws.id,
-      });
-    } else if (code !== 0) {
-      // Send error message
-      const errMsg = addChatMessage(ws, 'assistant',
-        '_Failed to get a response. Make sure `claude` CLI is available and you\'re logged in._',
-        userMsg.mockupId);
-      broadcastToWorkspace(ws.id, 'chat_message', {
-        type: 'chat_message', ...errMsg, workspace: ws.id,
-      });
-    }
-  });
-
-  // Close stdin immediately (non-interactive mode)
-  proc.stdin.end();
 }
 
 function getOrCreateOpenSession(ws) {
@@ -297,13 +164,8 @@ function scanWorkspace(ws) {
     }
   }
 
-  // Reset sessions when all mockups are deleted (clean start)
-  if (ws.knownFiles.size === 0 && ws.sessions.length > 0) {
-    ws.sessions = [];
-    ws.nextSession = 1;
-    ws.openSessionId = null;
-    saveSessions(ws);
-  }
+  // Round numbers never restart within a directory: feedback-round-N.md must
+  // not be overwritten when every mockup of a round gets deleted.
 
   ws.lastActive = Date.now();
   return changes;
@@ -340,17 +202,13 @@ function stopWatching(ws) {
   if (ws.slowPollTimer) { clearInterval(ws.slowPollTimer); ws.slowPollTimer = null; }
 }
 
+// `mockupDir` must already be validated by resolveMockupDir.
 function createWorkspace(projectPath, branch, mockupDir) {
-  const id = makeWorkspaceId(projectPath, branch);
+  const id = makeWorkspaceId(mockupDir);
 
   if (workspaces.has(id)) {
     const ws = workspaces.get(id);
     ws.lastActive = Date.now();
-    if (ws.mockupDir !== path.resolve(mockupDir)) {
-      stopWatching(ws);
-      ws.mockupDir = path.resolve(mockupDir);
-      startWatching(ws);
-    }
     return ws;
   }
 
@@ -359,7 +217,7 @@ function createWorkspace(projectPath, branch, mockupDir) {
     projectPath,
     projectName: path.basename(projectPath),
     branch: branch || 'default',
-    mockupDir: path.resolve(mockupDir),
+    mockupDir,
     knownFiles: new Map(),
     sessions: [],
     nextSession: 1,
@@ -367,7 +225,6 @@ function createWorkspace(projectPath, branch, mockupDir) {
     watcher: null, watchTimeout: null, watchWorking: false,
     pollTimer: null, slowPollTimer: null,
     openSessionId: null,
-    batching: false,
   };
 
   // Load existing sessions
@@ -383,7 +240,8 @@ function createWorkspace(projectPath, branch, mockupDir) {
 
   startWatching(ws);
   workspaces.set(id, ws);
-  broadcastGlobal('workspace-add', { id, projectName: ws.projectName, branch: ws.branch });
+  saveWorkspaceState();
+  broadcastGlobal('workspace-add', workspaceSummary(ws));
   return ws;
 }
 
@@ -392,7 +250,30 @@ function removeWorkspace(id) {
   if (!ws) return;
   stopWatching(ws);
   workspaces.delete(id);
+  saveWorkspaceState();
   broadcastGlobal('workspace-remove', { id });
+}
+
+// Registrations survive a restart (bin/register restarts the server when its
+// code changes), so other sessions' tabs don't disappear.
+function saveWorkspaceState() {
+  const state = [...workspaces.values()].map(ws => ({
+    projectPath: ws.projectPath, branch: ws.branch, mockupDir: ws.mockupDir,
+  }));
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch {}
+}
+
+function restoreWorkspaceState() {
+  let state;
+  try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return; }
+  if (!Array.isArray(state)) return;
+  for (const entry of state) {
+    const dir = resolveMockupDir(entry && entry.mockupDir);
+    if (dir && typeof entry.projectPath === 'string') {
+      createWorkspace(entry.projectPath, entry.branch, dir);
+    }
+  }
+  saveWorkspaceState();
 }
 
 // ── SSE Broadcasting ─────────────────────────────
@@ -412,12 +293,40 @@ function broadcastGlobal(event, data) {
 function readBody(req) {
   return new Promise((resolve) => {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > MAX_BODY) { body = ''; req.destroy(); resolve({}); }
+    });
     req.on('end', () => {
       try { resolve(JSON.parse(body)); }
       catch { resolve({}); }
     });
   });
+}
+
+function sendJson(res, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(obj));
+}
+
+// Rejects DNS-rebinding (foreign Host) and cross-site requests (foreign Origin).
+// Mockup iframes are sandboxed with an opaque origin, so their requests carry
+// `Origin: null` and are refused too. curl sends no Origin and is allowed.
+function checkRequestOrigin(req) {
+  if (!ALLOWED_HOSTS.has(req.headers.host || '')) return 'bad host';
+  const origin = req.headers.origin;
+  if (origin !== undefined && !ALLOWED_ORIGINS.has(origin)) return 'cross-origin request';
+  const site = req.headers['sec-fetch-site'];
+  if (site && site !== 'same-origin' && site !== 'none') return 'cross-site request';
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const type = (req.headers['content-type'] || '').split(';')[0].trim();
+    if (req.method === 'POST' && type !== 'application/json') return 'content-type must be application/json';
+  }
+  return null;
+}
+
+function workspaceFromPath(pathname) {
+  return workspaces.get(decodeURIComponent(pathname.split('/')[2] || ''));
 }
 
 function workspaceSummary(ws) {
@@ -429,24 +338,30 @@ function workspaceSummary(ws) {
 }
 
 // ── HTTP Server ──────────────────────────────────
-const template = fs.readFileSync(HARNESS, 'utf8');
+const template = TEMPLATE_SRC.toString('utf8');
 let browserOpened = false;
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  const rejection = checkRequestOrigin(req);
+  if (rejection) { sendJson(res, 403, { error: rejection }); return; }
 
   // ── Page ──────────────────────────────────────
   if (req.method === 'GET' && url.pathname === '/') {
+    // The Soniox key is only ever embedded in this page, which the checks above
+    // limit to same-origin loads on a loopback Host.
     const page = template.replace(
       '/*__SONIOX_KEY_INJECT__*/',
-      `window.__SONIOX_KEY = ${JSON.stringify(SONIOX_KEY || '')};`
+      `window.__SONIOX_KEY = ${JSON.stringify(SONIOX_KEY || '').replace(/</g, '\\u003c')};`
     );
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Frame-Options': 'DENY',
+      'Content-Security-Policy': "frame-ancestors 'none'",
+      'Referrer-Policy': 'no-referrer',
+    });
     res.end(page);
 
   // ── SSE ───────────────────────────────────────
@@ -475,11 +390,6 @@ const server = http.createServer(async (req, res) => {
       for (const session of ws.sessions) {
         res.write(`event: session\ndata: ${JSON.stringify({ ...session, workspace: id })}\n\n`);
       }
-      // Send existing chat history
-      const chatHistory = loadChatHistory(ws);
-      if (chatHistory.length > 0) {
-        res.write(`event: chat_history\ndata: ${JSON.stringify({ workspace: id, messages: chatHistory })}\n\n`);
-      }
     }
 
     res.write(`event: init-complete\ndata: {}\n\n`);
@@ -494,12 +404,17 @@ const server = http.createServer(async (req, res) => {
   // ── Register workspace ────────────────────────
   } else if (req.method === 'POST' && url.pathname === '/workspace/register') {
     const body = await readBody(req);
-    if (!body.projectPath || !body.mockupDir) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'projectPath and mockupDir required' }));
+    if (typeof body.projectPath !== 'string' || !body.projectPath || !body.mockupDir) {
+      sendJson(res, 400, { error: 'projectPath and mockupDir required' });
       return;
     }
-    const ws = createWorkspace(body.projectPath, body.branch, body.mockupDir);
+    const mockupDir = resolveMockupDir(body.mockupDir);
+    if (!mockupDir) {
+      sendJson(res, 400, { error: `mockupDir must be an existing directory inside ${MOCKUP_ROOT}` });
+      return;
+    }
+    const branch = typeof body.branch === 'string' ? body.branch : 'default';
+    const ws = createWorkspace(body.projectPath, branch, mockupDir);
 
     if (!browserOpened && !NO_OPEN) {
       browserOpened = true;
@@ -507,164 +422,53 @@ const server = http.createServer(async (req, res) => {
       else if (process.platform === 'linux') exec(`xdg-open http://localhost:${PORT} 2>/dev/null`);
     }
 
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(workspaceSummary(ws)));
+    sendJson(res, 200, workspaceSummary(ws));
 
   // ── Deregister workspace ──────────────────────
-  } else if (req.method === 'DELETE' && url.pathname.startsWith('/workspace/')) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    removeWorkspace(id);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
-
-  // ── Batch start (suppress auto-session during writes) ──
-  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/batch\/start$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
-    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    ws.batching = true;
-    ws.lastActive = Date.now();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ batching: true }));
-
-  // ── Batch end (create session immediately with all unassigned mockups) ──
-  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/batch\/end$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
-    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    ws.batching = false;
-    ws.lastActive = Date.now();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
+  } else if (req.method === 'DELETE' && url.pathname.match(/^\/workspace\/[^/]+$/)) {
+    removeWorkspace(decodeURIComponent(url.pathname.split('/')[2]));
+    sendJson(res, 200, { ok: true });
 
   // ── Create session (scoped to workspace) ──────
   } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/session$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
+    const ws = workspaceFromPath(url.pathname);
     if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    const session = getOrCreateOpenSession(ws);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(session || {}));
+    sendJson(res, 200, getOrCreateOpenSession(ws) || {});
 
-  // ── Submit feedback (write to file) ───────────
+  // ── Submit feedback (write to feedback-round-N.md) ──
   } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/feedback$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
+    const ws = workspaceFromPath(url.pathname);
     if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
     const body = await readBody(req);
-    const feedbackPath = path.join(ws.mockupDir, 'feedback.md');
+    // Round = the session the UI was showing, else the open one, else the latest.
+    // Resubmitting the same round overwrites its file.
+    const session =
+      ws.sessions.find(s => s.id === body.session) ||
+      ws.sessions.find(s => s.id === ws.openSessionId) ||
+      ws.sessions[ws.sessions.length - 1];
+    const round = session ? session.id : 1;
+    const feedbackPath = path.join(ws.mockupDir, `feedback-round-${round}.md`);
     try {
-      fs.writeFileSync(feedbackPath, body.content || '');
+      fs.writeFileSync(feedbackPath, typeof body.content === 'string' ? body.content : '');
       // Close current session — next files start a new round
       if (ws.openSessionId !== null) {
-        const session = ws.sessions.find(s => s.id === ws.openSessionId);
-        if (session) {
-          session.closed = true;
+        const open = ws.sessions.find(s => s.id === ws.openSessionId);
+        if (open) {
+          open.closed = true;
           saveSessions(ws);
-          broadcastToWorkspace(ws.id, 'session-closed', { id: session.id, workspace: ws.id });
+          broadcastToWorkspace(ws.id, 'session-closed', { id: open.id, workspace: ws.id });
         }
         ws.openSessionId = null;
       }
       ws.lastActive = Date.now();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ path: feedbackPath }));
+      sendJson(res, 200, { path: feedbackPath, round });
     } catch (e) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: e.message }));
+      sendJson(res, 500, { error: e.message });
     }
-
-  // ── Chat: send message ───────────────────────
-  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/chat$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
-    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    const body = await readBody(req);
-    if (!body.message) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'message required' }));
-      return;
-    }
-    const msg = addChatMessage(ws, 'user', body.message, body.mockupId, body.context);
-    broadcastToWorkspace(ws.id, 'chat_message', {
-      type: 'chat_message', ...msg, workspace: ws.id,
-    });
-    ws.lastActive = Date.now();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(msg));
-
-    // Auto-respond with Claude Code CLI
-    respondWithClaude(ws, msg);
-
-  // ── Chat: get history ──────────────────────────
-  } else if (req.method === 'GET' && url.pathname.match(/^\/workspace\/[^/]+\/chat$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
-    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    const history = loadChatHistory(ws);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(history));
-
-  // ── Chat: post response to a message ───────────
-  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/chat\/[^/]+\/respond$/)) {
-    const parts = url.pathname.split('/');
-    const id = decodeURIComponent(parts[2]);
-    const messageId = decodeURIComponent(parts[4]);
-    const ws = workspaces.get(id);
-    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    const body = await readBody(req);
-    const role = body.role || 'assistant';
-    const msg = addChatMessage(ws, role, body.content || '', body.mockupId);
-    msg.inReplyTo = messageId;
-    saveChatHistory(ws);
-    broadcastToWorkspace(ws.id, 'chat_message', {
-      type: 'chat_message', ...msg, workspace: ws.id,
-    });
-    ws.lastActive = Date.now();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(msg));
-
-  // ── Chat: stream a chunk (for progressive responses) ──
-  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/chat\/stream$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
-    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    const body = await readBody(req);
-    // body: {messageId, chunk, done}
-    broadcastToWorkspace(ws.id, 'chat_stream', {
-      type: 'chat_stream',
-      messageId: body.messageId || null,
-      chunk: body.chunk || '',
-      done: !!body.done,
-      workspace: ws.id,
-    });
-    // If done and there's a full content, save it
-    if (body.done && body.content) {
-      const msg = addChatMessage(ws, 'assistant', body.content, body.mockupId);
-      msg.inReplyTo = body.messageId;
-      saveChatHistory(ws);
-    }
-    ws.lastActive = Date.now();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
-
-  // ── Chat: typing indicator ─────────────────────
-  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/chat\/typing$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
-    if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
-    const body = await readBody(req);
-    broadcastToWorkspace(ws.id, 'chat_typing', {
-      type: 'chat_typing',
-      active: !!body.active,
-      workspace: ws.id,
-    });
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
 
   // ── Context: gather workspace context for AI ───
   } else if (req.method === 'GET' && url.pathname.match(/^\/workspace\/[^/]+\/context$/)) {
-    const id = decodeURIComponent(url.pathname.split('/')[2]);
-    const ws = workspaces.get(id);
+    const ws = workspaceFromPath(url.pathname);
     if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
 
     const mockupList = [];
@@ -687,7 +491,6 @@ const server = http.createServer(async (req, res) => {
       },
       mockups: mockupList,
       sessions: ws.sessions,
-      chatHistory: loadChatHistory(ws),
     };
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -697,6 +500,8 @@ const server = http.createServer(async (req, res) => {
   } else if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
+      app: 'design-explorer',
+      hash: CODE_HASH,
       pid: process.pid,
       port: PORT,
       soniox: !!SONIOX_KEY,
@@ -722,14 +527,26 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`\n  Design Explorer (singleton) → http://localhost:${PORT}`);
+server.on('error', (e) => {
+  console.error(`Design Explorer failed to listen on ${HOST}:${PORT}: ${e.message}`);
+  process.exit(1);
+});
+
+server.listen(PORT, HOST, () => {
+  try { fs.writeFileSync(PID_FILE, String(process.pid)); } catch {}
+  console.log(`\n  Design Explorer (singleton) → http://localhost:${PORT} (bound to ${HOST})`);
   console.log(`  PID: ${process.pid}`);
   console.log(`  Voice: ${SONIOX_KEY ? '✓ Soniox ready' : '✗ disabled'}\n`);
 
+  restoreWorkspaceState();
+
   // Legacy mode: auto-register if --dir was passed
   if (LEGACY_DIR) {
-    const dir = path.resolve(LEGACY_DIR);
+    const dir = resolveMockupDir(LEGACY_DIR);
+    if (!dir) {
+      console.error(`  --dir must be an existing directory inside ${MOCKUP_ROOT}`);
+      process.exit(1);
+    }
     let branch = 'default';
     try { branch = require('child_process').execSync('git branch --show-current', { cwd: path.dirname(dir) }).toString().trim() || 'default'; } catch {}
     const projectPath = path.dirname(dir);

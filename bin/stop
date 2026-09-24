@@ -17,8 +17,9 @@ if [[ -f "$PID_FILE" ]]; then
   fi
 fi
 
-# Fallback: find by port
-PID=$(lsof -ti ":$PORT" 2>/dev/null | head -1 || true)
+# Fallback: ask the server on this port for its PID, so nothing else gets killed
+PID=$(curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" 2>/dev/null \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const h=JSON.parse(s);if(h.pid)console.log(h.pid)}catch{}})' || true)
 if [[ -n "$PID" ]]; then
   kill "$PID" 2>/dev/null
   echo "Stopped server (PID $PID)"

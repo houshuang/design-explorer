@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-24 — Hardened server, per-session workspaces, feedback files per round
+
+- **Security**: bind to `127.0.0.1`; removed wildcard CORS; reject foreign `Host` (DNS rebinding) and foreign `Origin`/`Sec-Fetch-Site` (CSRF); POSTs must be JSON with a 1 MB cap; workspace directories must resolve (after symlinks) inside `/tmp/claude/design-explorer`; the harness page is `no-store` and cannot be framed. Mockup iframes are `sandbox="allow-scripts"`, and mockup HTML is parsed through an inert `<template>` so it never runs in the harness origin.
+- **Removed the chat feature** (`/workspace/:id/chat*`, which spawned `claude -p`) and the no-op `batch/start`/`batch/end` endpoints.
+- **Lifecycle**: `register` detaches the server into its own session with logs in `~/.claude/design-explorer.log`; `/health` exposes a code hash and `register` restarts stale servers, keeping registrations via `~/.claude/design-explorer-workspaces.json`; it fails loudly when the port belongs to another process. Request JSON is built with `JSON.stringify` rather than shell interpolation.
+- **Concurrency**: workspace IDs come from the mockup directory, and SKILL.md gives each exploration its own `<repo>-<topic>-<time>` directory.
+- **Feedback**: written to `feedback-round-N.md` with the mockup filename in every heading; round numbers no longer restart when a round's mockups are deleted. SKILL.md waits for the file with Monitor instead of asking for a paste.
+- **SKILL.md**: `allowed-tools`, 5-then-3–4 round sizes, constraints and variation axes before generating, real content and full-resolution images, and less push towards radical styles when a design language exists.
+- **Tests**: `node --test test/server.test.js`.
+
+---
+
 ## 2026-03-11 — Feedback-Driven Sessions (replaces batch signaling)
 
 ### Problem
