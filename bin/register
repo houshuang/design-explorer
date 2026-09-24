@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Register a workspace with the Design Explorer singleton server.
-# Starts the server if not running. Outputs the workspace ID.
+# Starts the server if not running, restarts it if its code differs from the
+# installed files. Outputs the workspace ID.
 #
-# Usage: register --project /path --branch main --dir /path/mockups
+# Usage: register --project /path --dir /tmp/claude/design-explorer/mockups/NAME [--branch main]
 #   --project  Project root path (required)
 #   --branch   Git branch name (optional, default: current branch or "default")
-#   --dir      Mockup directory (required, created if missing)
+#   --dir      Mockup directory under /tmp/claude/design-explorer (required, created if missing)
 
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER_JS="$SKILL_DIR/assets/server.js"
-PID_FILE="$HOME/.claude/design-explorer.pid"
+TEMPLATE="$SKILL_DIR/assets/harness-template.html"
+LOG_FILE="$HOME/.claude/design-explorer.log"
 PORT=10000
 PROJECT=""
 BRANCH=""
@@ -28,60 +30,93 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$PROJECT" || -z "$DIR" ]]; then
-  echo "Usage: register --project /path --dir /path/mockups [--branch main]" >&2
+  echo "Usage: register --project /path --dir /tmp/claude/design-explorer/mockups/NAME [--branch main]" >&2
   exit 1
 fi
 
-# Auto-detect branch if not provided
 if [[ -z "$BRANCH" ]]; then
-  BRANCH=$(cd "$PROJECT" 2>/dev/null && git branch --show-current 2>/dev/null || echo "default")
+  BRANCH=$(cd "$PROJECT" 2>/dev/null && git branch --show-current 2>/dev/null || true)
+  BRANCH=${BRANCH:-default}
 fi
 
-# Ensure mockup directory exists
-mkdir -p "$DIR"
+mkdir -p "$DIR" "$HOME/.claude"
 
-# Check if server is already running
-server_running() {
-  curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1
+BASE="http://127.0.0.1:$PORT"
+EXPECTED_HASH=$(cat "$SERVER_JS" "$TEMPLATE" | node -e '
+  const h = require("crypto").createHash("sha256");
+  process.stdin.on("data", d => h.update(d)).on("end", () => console.log(h.digest("hex")));')
+
+# Prints "<hash> <pid>" when a design-explorer server answers /health.
+# Servers from before the hash existed report "none <pid>".
+probe() {
+  curl -sf --max-time 2 "$BASE/health" 2>/dev/null | node -e '
+    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+      try {
+        const h = JSON.parse(s);
+        if (h.app === "design-explorer" || (Array.isArray(h.workspaces) && "soniox" in h))
+          console.log((h.hash || "none") + " " + h.pid);
+      } catch {}
+    });' || true
 }
 
-# Start server if needed
-if ! server_running; then
-  # Clean stale PID file
-  if [[ -f "$PID_FILE" ]]; then
-    OLD_PID=$(cat "$PID_FILE" 2>/dev/null || true)
-    if [[ -n "$OLD_PID" ]] && ! kill -0 "$OLD_PID" 2>/dev/null; then
-      rm -f "$PID_FILE"
-    fi
-  fi
+port_holder() {
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true
+}
 
-  node "$SERVER_JS" --port "$PORT" --no-open &
-  SERVER_PID=$!
-  disown "$SERVER_PID" 2>/dev/null || true
-
-  # Wait for server to be ready (up to 5s)
-  for i in $(seq 1 50); do
-    if server_running; then break; fi
+wait_until() {
+  for _ in $(seq 1 50); do
+    if eval "$1"; then return 0; fi
     sleep 0.1
   done
+  return 1
+}
 
-  if ! server_running; then
-    echo "Failed to start server" >&2
-    exit 1
-  fi
+fail() {
+  echo "design-explorer: $1" >&2
+  echo "Server log: $LOG_FILE" >&2
+  exit 1
+}
+
+PROBE=$(probe)
+if [[ -n "$PROBE" && "${PROBE%% *}" != "$EXPECTED_HASH" ]]; then
+  OLD_PID="${PROBE##* }"
+  kill "$OLD_PID" 2>/dev/null || true
+  wait_until '[[ -z "$(port_holder)" ]]' || fail "old server (PID $OLD_PID) did not release port $PORT"
+  PROBE=""
 fi
 
-# Register workspace
-RESULT=$(curl -sf -X POST "http://localhost:$PORT/workspace/register" \
-  -H 'Content-Type: application/json' \
-  -d "{\"projectPath\": \"$PROJECT\", \"branch\": \"$BRANCH\", \"mockupDir\": \"$DIR\"}")
+if [[ -z "$PROBE" ]]; then
+  HOLDER=$(port_holder)
+  if [[ -n "$HOLDER" ]]; then
+    fail "port $PORT is held by PID $HOLDER ($(ps -o command= -p "$HOLDER" 2>/dev/null || echo unknown)), which is not design-explorer"
+  fi
 
-# Extract and output workspace ID
-WORKSPACE_ID=$(echo "$RESULT" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+  # Detach into its own session with stdin closed, so stopping the calling
+  # shell (e.g. a Claude Bash task) does not take the server down with it.
+  node -e '
+    const fs = require("fs");
+    const [node, script, port, log] = process.argv.slice(1);
+    const out = fs.openSync(log, "a");
+    require("child_process").spawn(node, [script, "--port", port, "--no-open"], {
+      detached: true, stdio: ["ignore", out, out],
+    }).unref();' "$(command -v node)" "$SERVER_JS" "$PORT" "$LOG_FILE"
+
+  wait_until '[[ "$(probe)" == "$EXPECTED_HASH "* ]]' || fail "server did not start on port $PORT"
+fi
+
+BODY=$(node -e 'console.log(JSON.stringify({ projectPath: process.argv[1], branch: process.argv[2], mockupDir: process.argv[3] }))' \
+  "$PROJECT" "$BRANCH" "$DIR")
+
+RESULT=$(curl -s --max-time 5 -X POST "$BASE/workspace/register" \
+  -H 'Content-Type: application/json' --data-binary "$BODY" || true)
+
+WORKSPACE_ID=$(printf '%s' "$RESULT" | node -e '
+  let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+    try { const r = JSON.parse(s); if (r.id) console.log(r.id); } catch {}
+  });')
 
 if [[ -z "$WORKSPACE_ID" ]]; then
-  echo "Failed to register workspace" >&2
-  echo "$RESULT" >&2
+  echo "Failed to register workspace: $RESULT" >&2
   exit 1
 fi
 

@@ -1,12 +1,18 @@
 ---
 name: design-explorer
 description: Generate diverse design mockups and collect structured feedback via full-screen carousel with keyboard voting, notes, and optional voice
-user_invocable: true
+user-invocable: true
+allowed-tools:
+  - Bash(~/.claude/skills/design-explorer/bin/*)
+  - Write(//tmp/claude/design-explorer/**)
+  - Edit(//tmp/claude/design-explorer/**)
+  - Write(//private/tmp/claude/design-explorer/**)
+  - Edit(//private/tmp/claude/design-explorer/**)
 ---
 
 # Design Explorer
 
-Generate many diverse design mockups as HTML fragments. A global singleton server serves a full-screen keyboard-driven carousel with thumbs voting, notes, and optional voice recording. User submits feedback (copied to clipboard) and pastes it back.
+Generate design mockups as HTML fragments. A local singleton server shows them in a full-screen, keyboard-driven carousel with voting, notes and optional voice. When the user submits, feedback is written to a file you wait for; it is also copied to the clipboard as a fallback.
 
 ## Trigger
 
@@ -16,191 +22,112 @@ User says: `/design-explorer [description]` or "explore designs for [thing]"
 
 ### 0. Preparation
 
-Before generating mockups, check for design context in the project:
-- Read any `DESIGN_GUIDE.md`, design tokens, or existing mockups in the project
-- Check `CLAUDE.md` for design system references
-- If the project has an established visual language, use it by default — unless the user explicitly asks to explore alternative designs. In that case, still read the existing design as a baseline to riff from, but feel free to diverge.
-- If no design system exists, explore freely across the full aesthetic spectrum
+- Read any `DESIGN_GUIDE.md`, design tokens, existing screens or mockups, and design references in `CLAUDE.md`.
+- If the project has an established visual language, use it by default. Diverge only when the user asks for alternatives, and even then riff from the existing design.
+- If no design system exists, explore freely across the aesthetic spectrum.
 
 ### 1. Register with the server
 
-Mockups are stored in a **centralized location** under `/tmp/claude/design-explorer/mockups/`, organized by git repo name. This keeps them findable regardless of which subdirectory Claude is invoked from, out of your project repos, and inside the bash sandbox's writable allowlist — so the cleanup/reset commands below never trigger a permission or sandbox prompt. (Mockups are ephemeral working artifacts; the skill resets them to a clean slate each session anyway, so living under `/tmp` is fine.)
+Each exploration gets its **own directory** under `/tmp/claude/design-explorer/mockups/`, named after the repo plus a short topic slug and a time suffix. Other sessions (even in the same repo) use their own directories, so never touch a directory you did not create. The server refuses directories outside `/tmp/claude/design-explorer`.
 
 ```bash
 PROJECT_NAME=$(cd "{working_dir}" && basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || basename "{working_dir}")
-MOCKUP_DIR="/tmp/claude/design-explorer/mockups/$PROJECT_NAME"
-mkdir -p "$MOCKUP_DIR"
-REGISTER_OUTPUT=$(~/.claude/skills/design-explorer/bin/register \
-  --project "{working_dir}" --dir "$MOCKUP_DIR" 2>/dev/null)
-# The register script prints the workspace ID on stdout
-WORKSPACE_ID="$REGISTER_OUTPUT"
+MOCKUP_DIR="/tmp/claude/design-explorer/mockups/$PROJECT_NAME-{topic-slug}-$(date +%H%M%S)"
+mkdir -p "$MOCKUP_DIR" && echo "$MOCKUP_DIR"
+~/.claude/skills/design-explorer/bin/register --project "{working_dir}" --dir "$MOCKUP_DIR"
 ```
 
-Save the `WORKSPACE_ID` — you'll need it for batch signaling in step 2.
+`{topic-slug}` is 1–3 words, e.g. `settings-page`. Shell variables do not persist between Bash calls, so note the printed `MOCKUP_DIR` and use the literal path from now on. To continue an earlier exploration, reuse its directory instead of creating a new one.
 
-This starts the server if not running (always port 10000), registers a workspace, and opens the browser on first registration. If another project is already using the server, this project gets a separate tab in the UI.
+`register` starts the server if needed (always `http://localhost:10000`), restarts it if the installed code changed, and prints the workspace ID. Each directory gets its own tab in the UI. If it fails, it prints the reason and the log path (`~/.claude/design-explorer.log`); report that to the user rather than working around it.
 
-The server URL is always `http://localhost:10000`.
+### 2. Plan, then generate
 
-### 2. Clean up and generate mockups
+Before writing any mockup, write down in your reply:
+- **Fixed constraints**: what every mockup keeps (content, data, brand, platform, required features).
+- **2–3 variation axes**: the dimensions this round explores (e.g. density, navigation model, tone). Place each mockup at a distinct point on those axes.
 
-**Before generating, check for existing mockup files:**
-```bash
-ls "$MOCKUP_DIR"/*.html 2>/dev/null
-```
+**Round size**: 5 mockups in the first round; 3–4 when converging on liked directions. Write them as parallel Write calls in one batch.
 
-If there are old mockups from previous sessions, **remove them** so the carousel starts clean. Don't read them — just delete them. Also reset sessions.json. Use `find … -delete` (not `rm -f "$DIR"/*.html`) — the glob-on-a-variable form trips a non-bypassable safety prompt; `find` does not. The `${MOCKUP_DIR:?}` guard turns an empty/unset path into a hard error instead of deleting the wrong directory:
-```bash
-find "${MOCKUP_DIR:?}" -maxdepth 1 \( -name '*.html' -o -name 'feedback.md' \) -delete
-echo '[]' > "$MOCKUP_DIR"/sessions.json
-```
+Each mockup is a file `mockup-{descriptive-slug}.html` in `MOCKUP_DIR`:
+- The slug captures the design's character in 2–4 words (`mockup-warm-editorial.html`, `mockup-dense-dashboard.html`), never `mockup-1.html` or `mockup-v2.html`.
+- `data-mockup-id` matches the filename without `.html`.
 
-If the user explicitly asks to keep previous mockups (e.g., to iterate on them), skip the cleanup. But the default is a clean slate — old mockups clutter the carousel and slow down review.
-
-Each mockup is a **separate HTML fragment file** with a **descriptive slug name**: `mockup-dark-sidebar.html`, `mockup-minimal-cards.html`, `mockup-retro-brutalist.html`, etc.
-
-**Naming rules:**
-- Use `mockup-{descriptive-slug}.html` — the slug should capture the design's distinctive character in 2-4 words
-- NEVER use generic sequential names like `mockup-1.html` — these collide across sessions and tell you nothing about the content
-- Good examples: `mockup-warm-editorial.html`, `mockup-dense-dashboard.html`, `mockup-organic-cards.html`
-- Bad examples: `mockup-1.html`, `mockup-new.html`, `mockup-v2.html`
-- The `data-mockup-id` must match the filename (without `.html`)
-
-A mockup file is a `<section>` wrapper — no `<html>`, `<head>`, or boilerplate needed. Each mockup renders inside an **isolated iframe** with pre-loaded resources (see "What's available inside each mockup" below).
+A mockup file is a `<section>` wrapper, no `<html>` or `<head>`:
 
 ```html
 <section class="mockup-section" data-mockup-id="mockup-warm-editorial" data-label="Warm Editorial">
-  <!-- Your design HTML goes directly here -->
-  <!-- Tailwind classes, custom <style> blocks, Lucide icons, Google Fonts all available -->
+  <!-- Design HTML; Tailwind classes, <style> blocks, Lucide icons and Google Fonts are available -->
 </section>
 ```
 
-**Write mockups in batches of 5** — each is an independent file. Write 5 in parallel, then another 5. Writing all 10 in one parallel blast can exceed output token limits and crash the response.
-
-All mockup files written before the user submits feedback (presses C in the UI) are grouped into one session/round automatically. No batch signaling needed — the server tracks an "open session" that collects all new files until the user submits feedback, which closes it. The next batch of files then starts a new session.
+All files written before the user submits feedback form one round. The next files you write start the next round automatically.
 
 ### What's available inside each mockup
 
-Every mockup renders inside an isolated iframe with these resources pre-loaded. Use them freely without adding imports or boilerplate:
+Each mockup renders in a sandboxed iframe (`sandbox="allow-scripts"`): scripts run, but the mockup cannot reach the parent page, use `localStorage`/cookies, or submit forms. Pre-loaded:
 
-**Tailwind CSS** (full JIT compiler via CDN)
-- Use any Tailwind utility class directly: `class="flex items-center gap-4 bg-zinc-900 p-8"`
-- Custom `<style>` blocks work alongside Tailwind for anything beyond utilities
-- Customize Tailwind config inline if needed: `<script>tailwind.config = { theme: { extend: { colors: { parchment: '#f7f4ec' } } } }</script>`
-
-**Google Fonts** — 11 diverse families pre-loaded, spanning the full aesthetic range:
-
-| Font | Character | Good for |
-|------|-----------|----------|
-| **Inter** | Clean, neutral sans | Modern UI, dashboards, apps |
-| **DM Sans** | Geometric, warm | Friendly brands, marketing |
-| **Space Grotesk** | Techy, distinctive | Developer tools, tech products |
-| **Syne** | Futuristic geometric | Experimental, avant-garde, kinetic |
-| **Cormorant Garamond** | Elegant display serif | Editorial, luxury, scholarly |
-| **EB Garamond** | Classical body serif | Books, manuscripts, traditional |
-| **Crimson Pro** | Readable body serif | Long-form reading, articles |
-| **Playfair Display** | Bold editorial serif | Headlines, magazines, drama |
-| **Instrument Serif** | Contemporary serif | Fashion, art, distinctive branding |
-| **JetBrains Mono** | Coding monospace | Technical UI, terminals, data |
-| **Space Mono** | Quirky monospace | Retro-tech, brutalist, playful |
-
-Use via CSS (`font-family: 'Cormorant Garamond'`) or Tailwind (`class="font-['Cormorant_Garamond']"`).
-Additional fonts: add `@import` in a `<style>` block for any Google Font not in this list.
-
-**Lucide Icons** — 1500+ icons, no SVG code needed:
-```html
-<i data-lucide="search"></i>
-<i data-lucide="menu"></i>
-<i data-lucide="heart" class="w-5 h-5 text-red-500"></i>
-```
-Browse the full set at https://lucide.dev/icons
-
-**CSS baseline:**
-- `box-sizing: border-box` on all elements
-- `body { margin: 0; padding: 0 }` — you control all spacing
-- Font smoothing and optimized text rendering enabled
-- Default font: Inter (override freely — this is just a fallback, not a recommendation)
+- **Tailwind CSS** (JIT via CDN). Inline config works: `<script>tailwind.config = { theme: { extend: { colors: { parchment: '#f7f4ec' } } } }</script>`
+- **Google Fonts**: Inter, DM Sans, Space Grotesk, Syne, Cormorant Garamond, EB Garamond, Crimson Pro, Playfair Display, Instrument Serif, JetBrains Mono, Space Mono. Use `font-family: 'Cormorant Garamond'` or `class="font-['Cormorant_Garamond']"`; `@import` any other Google Font.
+- **Lucide icons**: `<i data-lucide="search" class="w-5 h-5"></i>` (https://lucide.dev/icons)
+- **Baseline CSS**: `box-sizing: border-box`, `body { margin: 0 }`, Inter as fallback font.
 
 ### Design generation principles
 
-- **Be radically diverse**: Don't generate variations of the same idea. Explore fundamentally different visual languages, layouts, color palettes, typography pairings, and interaction models.
-- **Push beyond defaults**: Include unconventional, surprising, even provocative approaches. Brutalist, maximalist, kinetic, editorial, retro-futuristic, organic, neo-classical, deconstructed — go well beyond safe corporate UI patterns.
-- **Binary search the design space**: Cover extremes — minimal vs. maximal, dark vs. light, dense vs. spacious, serif vs. sans, geometric vs. organic, structured vs. freeform, warm vs. cool, quiet vs. bold.
-- **Unique functionality**: Each mockup should showcase different feature ideas or interaction patterns, not just visual restyling of the same layout.
-- **Full creative range**: The pre-loaded resources support everything from Renaissance-folio aesthetics (Cormorant Garamond, warm parchment palettes, structural ornaments, hairline rules) to brutalist tech (Space Mono, raw CSS grid, high contrast, no border-radius) to futuristic experimental (Syne, gradients, glassmorphism, asymmetric layouts). Use the full spectrum.
-- **Bespoke over generic**: Each design should feel like it was made for this specific product, not assembled from a component library. Invent custom visual metaphors, unique color relationships, and distinctive spatial rhythms.
-- **Self-contained**: Each mockup uses Tailwind classes, inline styles, or scoped `<style>` tags. No external dependencies needed beyond what the harness provides.
+- **Real content**: use the product's actual copy, data, names and screens. No lorem ipsum or grey placeholder boxes. Images must be full-resolution `https://` URLs (the project's live assets or suitable photos) or `data:` URIs; local file paths do not load.
+- **Distinct, not cosmetic**: each mockup should differ along the chosen axes in layout, hierarchy or interaction model, not just colour.
+- **Range to match the brief**: without an existing design language, cover real extremes (minimal vs. maximal, dense vs. spacious, serif vs. sans, quiet vs. bold) and include at least one unexpected direction. With one, stay inside it and vary structure and interaction instead.
+- **Bespoke over generic**: make each design feel built for this product rather than assembled from a component library.
+- **Self-contained**: Tailwind, inline styles or scoped `<style>` only.
 
 ### 3. Wait for feedback
 
-Tell the user:
-1. The mockups are live at `http://localhost:10000` (always the same URL)
-2. Use arrow keys to navigate, up/down to vote, Tab for notes, C to submit feedback (copies to clipboard)
-3. Paste the feedback back here when ready
+Tell the user the mockups are live at `http://localhost:10000`: arrows navigate, ↑/↓ vote, Tab for notes, hold Space to dictate (if voice is set up), C to submit.
 
-Wait for the user to paste their feedback before proceeding.
+Then wait for the round's feedback file instead of asking the user to paste. Round N is 1 for the first batch in this directory and goes up by one per submitted round. Start a Monitor (timeout 30 min) with:
+
+```bash
+F="/tmp/claude/design-explorer/mockups/<dir>/feedback-round-N.md"
+for i in $(seq 1 900); do [ -s "$F" ] && { cat "$F"; exit 0; }; sleep 2; done; echo "No feedback after 30 min: $F"
+```
+
+If Monitor is unavailable, run the same loop with Bash `run_in_background`. If it times out, ask the user to press C or paste the feedback (it is on their clipboard).
 
 ### 4. Iterate
 
-Based on feedback:
-- **Edit** a specific mockup: read + edit its file (e.g., `mockup-warm-editorial.html`)
-- **Remove** a thumbs-down mockup: delete its file
-- **Add** new variants: wrap in batch signals (`batch/start` → write files → `batch/end`), scan existing files first to avoid name collisions
-- The browser updates live on every file change — no reload
-- Go back to step 3
+- **Edit** a liked mockup in place: the iframe reloads live.
+- **Delete** rejected mockups.
+- **Add** new variants with fresh slugs (list the directory first to avoid collisions).
+- Go back to step 3 with the next round number.
 
 ### Interpreting feedback
 
-Feedback is proposal-centric — each mockup with feedback gets its own section:
-
 ```
-### Warm Editorial  [👍]
+### Warm Editorial (mockup-warm-editorial.html)  [👍]
 Love the dark palette, serif typography works well
 
-### Dense Dashboard  [👎]
+### Dense Dashboard (mockup-dense-dashboard.html)  [👎]
 Too busy, hard to read
 
 ### No feedback
-- Minimal Cards
-- Retro Brutalist
+- Minimal Cards (mockup-minimal-cards.html)
 ```
 
-- **👍 = strong positive** — build on these directions
-- **👎 = clear rejection** — don't iterate on these
-- **No feedback = not interesting enough to comment on** — move away
-- **Notes are the richest signal** — read carefully for nuance and specific elements called out
-- Focus on what the user LIKED and amplify those qualities in next round
+- **👍** strong positive: build on it. **👎** rejection: drop it.
+- **No feedback**: not interesting enough to comment on; move away.
+- **Notes are the richest signal**: read them for the specific elements called out, and amplify what was liked.
 
 ## Technical notes
 
-- **Global singleton**: One server on port 10000 serves all projects. Each project registers as a workspace with its own tab in the UI.
-- **Session lifecycle**: All files go into the current "open session". When the user submits feedback (C key), the session closes. Next files automatically start a new session. No batch signaling needed.
-- **Feedback**: When the user presses C (or clicks Submit), feedback is copied to clipboard. The user pastes it back into the conversation.
-- **Isolation**: Each mockup renders in its own iframe. CSS and JS cannot leak between mockups or break the carousel UI.
-- **Auto-height**: Iframes auto-resize to match their content height.
-- **Live updates**: When you edit a mockup file, the iframe reloads with updated content.
-- **PID management**: Server writes `~/.claude/design-explorer.pid`. Idle shutdown after 30 min with no workspaces.
-- **Legacy compat**: The old `--dir` flag still works for single-workspace mode.
+- **Singleton**: one server on `127.0.0.1:10000` for all projects; each mockup directory is a workspace tab. Registrations survive server restarts.
+- **Security**: loopback only; requests with a foreign `Host` or `Origin` are refused.
+- **Rounds**: submitting (C) closes the round and writes `feedback-round-N.md`; resubmitting the same round overwrites that file.
+- **Lifecycle**: the server runs detached from the Claude session; PID in `~/.claude/design-explorer.pid`, log in `~/.claude/design-explorer.log`.
 
 ## CLI tools
 
 ```bash
-# Register workspace (starts server if needed)
-~/.claude/skills/design-explorer/bin/register --project /path --dir /path/mockups [--branch main]
-
-# Check server status
+~/.claude/skills/design-explorer/bin/register --project /path --dir /tmp/claude/design-explorer/mockups/NAME [--branch main]
 ~/.claude/skills/design-explorer/bin/status
-
-# Stop server
 ~/.claude/skills/design-explorer/bin/stop
 ```
-
-## Key benefits of fragment architecture
-
-- **Write**: Each mockup is 20-50 lines, not a 500-line monolith
-- **Edit**: Read + edit one small file, not search through a huge page
-- **Delete**: Just delete the file
-- **Parallel writes**: Write 5 mockups in 5 parallel tool calls
-- **No boilerplate**: Tailwind, fonts, icons, and CSS reset are provided by the harness — never write these
-- **No CSS conflicts**: iframe isolation means mockup styles can't break other mockups or the carousel
-- **Live updates**: SSE pushes add/update/remove — no full page reloads

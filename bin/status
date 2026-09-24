@@ -4,7 +4,7 @@ set -euo pipefail
 
 PORT=${1:-10000}
 
-HEALTH=$(curl -sf "http://localhost:$PORT/health" 2>/dev/null) || {
+HEALTH=$(curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" 2>/dev/null) || {
   echo "Server not running"
   exit 1
 }
