@@ -122,6 +122,43 @@ function getOrCreateOpenSession(ws) {
   return session;
 }
 
+// An empty open round stays open, so round numbers have no gaps.
+function closeOpenSession(ws) {
+  const open = ws.sessions.find(s => s.id === ws.openSessionId);
+  if (!open || open.closed || open.mockups.length === 0) return;
+  open.closed = true;
+  ws.openSessionId = null;
+  saveSessions(ws);
+  broadcastToWorkspace(ws.id, 'session-closed', { id: open.id, workspace: ws.id });
+}
+
+// Idempotent: while the open round has no mockups, calling it again only
+// updates the label.
+function startRound(ws, label) {
+  // Files written just before the call still belong to the round being closed.
+  pushWorkspaceChanges(ws);
+  closeOpenSession(ws);
+  const session = getOrCreateOpenSession(ws);
+  if (label) {
+    session.label = label;
+    saveSessions(ws);
+    broadcastToWorkspace(ws.id, 'session', { ...session, workspace: ws.id });
+  }
+  return session;
+}
+
+// New and revised mockups belong to the open round, so each round shows
+// exactly what changed since the last one.
+function assignToOpenSession(ws, mockupId) {
+  const session = getOrCreateOpenSession(ws);
+  for (const s of ws.sessions) {
+    if (s !== session) s.mockups = s.mockups.filter(m => m !== mockupId);
+  }
+  if (!session.mockups.includes(mockupId)) session.mockups.push(mockupId);
+  saveSessions(ws);
+  return session.id;
+}
+
 function scanWorkspace(ws) {
   let files;
   try { files = fs.readdirSync(ws.mockupDir).filter(isMockup).sort(); }
@@ -140,20 +177,16 @@ function scanWorkspace(ws) {
       const html = fs.readFileSync(filePath, 'utf8');
       const id = file.replace('.html', '');
       let sessionId = sessionForMockup(ws, id);
-      if (sessionId === null) {
-        const session = getOrCreateOpenSession(ws);
-        if (!session.mockups.includes(id)) {
-          session.mockups.push(id);
-          saveSessions(ws);
-        }
-        sessionId = session.id;
-      }
+      if (sessionId === null) sessionId = assignToOpenSession(ws, id);
       ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session: sessionId });
       changes.push({ type: 'add', id, html, session: sessionId, workspace: ws.id });
     } else if (stat.mtimeMs > existing.mtime) {
       const html = fs.readFileSync(filePath, 'utf8');
-      ws.knownFiles.set(file, { ...existing, mtime: stat.mtimeMs, html });
-      changes.push({ type: 'update', id: file.replace('.html', ''), html, workspace: ws.id });
+      const id = file.replace('.html', '');
+      const current = ws.sessions.find(s => s.id === existing.session);
+      const sessionId = current && !current.closed ? current.id : assignToOpenSession(ws, id);
+      ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session: sessionId });
+      changes.push({ type: 'update', id, html, session: sessionId, workspace: ws.id });
     }
   }
 
@@ -435,6 +468,19 @@ const server = http.createServer(async (req, res) => {
     if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
     sendJson(res, 200, getOrCreateOpenSession(ws) || {});
 
+  // ── Start a new round (bin/round) ─────────────
+  } else if (req.method === 'POST' && url.pathname === '/round') {
+    const body = await readBody(req);
+    const mockupDir = resolveMockupDir(body.mockupDir);
+    const ws = mockupDir && [...workspaces.values()].find(w => w.mockupDir === mockupDir);
+    if (!ws) { sendJson(res, 404, { error: 'mockupDir is not registered; run bin/register first' }); return; }
+    const label = typeof body.label === 'string' ? body.label.trim().slice(0, 80) : '';
+    const session = startRound(ws, label);
+    sendJson(res, 200, {
+      round: session.id, label: session.label || '',
+      feedback: path.join(ws.mockupDir, `feedback-round-${session.id}.md`),
+    });
+
   // ── Submit feedback (write to feedback-round-N.md) ──
   } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/feedback$/)) {
     const ws = workspaceFromPath(url.pathname);
@@ -450,16 +496,8 @@ const server = http.createServer(async (req, res) => {
     const feedbackPath = path.join(ws.mockupDir, `feedback-round-${round}.md`);
     try {
       fs.writeFileSync(feedbackPath, typeof body.content === 'string' ? body.content : '');
-      // Close current session — next files start a new round
-      if (ws.openSessionId !== null) {
-        const open = ws.sessions.find(s => s.id === ws.openSessionId);
-        if (open) {
-          open.closed = true;
-          saveSessions(ws);
-          broadcastToWorkspace(ws.id, 'session-closed', { id: open.id, workspace: ws.id });
-        }
-        ws.openSessionId = null;
-      }
+      // Feedback on the open round closes it; the next files start a new one.
+      if (session && session.id === ws.openSessionId) closeOpenSession(ws);
       ws.lastActive = Date.now();
       sendJson(res, 200, { path: feedbackPath, round });
     } catch (e) {

@@ -49,6 +49,14 @@ Before writing any mockup, write down in your reply:
 
 **Round size**: 5 mockups in the first round; 3–4 when converging on liked directions. Write them as parallel Write calls in one batch.
 
+**Start the round first.** Before writing or editing any mockup for this round, including the first, run:
+
+```bash
+~/.claude/skills/design-explorer/bin/round --dir "<MOCKUP_DIR>" --label "<what this round explores, 2–5 words>"
+```
+
+It prints `Round N · label` and the feedback file to wait for. Every mockup created **or edited** after the call belongs to round N, so the round pill in the UI shows exactly what is new; untouched mockups stay in their earlier rounds. Running it again before any file is written only updates the label, so a repeat after compaction is harmless.
+
 Each mockup is a file `mockup-{descriptive-slug}.html` in `MOCKUP_DIR`:
 - The slug captures the design's character in 2–4 words (`mockup-warm-editorial.html`, `mockup-dense-dashboard.html`), never `mockup-1.html` or `mockup-v2.html`.
 - `data-mockup-id` matches the filename without `.html`.
@@ -61,7 +69,6 @@ A mockup file is a `<section>` wrapper, no `<html>` or `<head>`:
 </section>
 ```
 
-All files written before the user submits feedback form one round. The next files you write start the next round automatically.
 
 ### What's available inside each mockup
 
@@ -84,21 +91,24 @@ Each mockup renders in a sandboxed iframe (`sandbox="allow-scripts"`): scripts r
 
 Tell the user the mockups are live at `http://localhost:10000`: arrows navigate, ↑/↓ vote, Tab for notes, hold Space to dictate (if voice is set up), C to submit.
 
-Then wait for the round's feedback file instead of asking the user to paste. Round N is 1 for the first batch in this directory and goes up by one per submitted round. Start a Monitor (timeout 30 min) with:
+Then wait for the feedback file that `round` printed instead of asking the user to paste. Start a Monitor (timeout 30 min) with:
 
 ```bash
-F="/tmp/claude/design-explorer/mockups/<dir>/feedback-round-N.md"
+F="<feedback file printed by round>"
 for i in $(seq 1 900); do [ -s "$F" ] && { cat "$F"; exit 0; }; sleep 2; done; echo "No feedback after 30 min: $F"
 ```
 
 If Monitor is unavailable, run the same loop with Bash `run_in_background`. If it times out, ask the user to press C or paste the feedback (it is on their clipboard).
 
+The user often gives feedback in chat instead. Treat it the same way: stop the Monitor and go to step 4. Do not write `feedback-round-N.md` yourself.
+
 ### 4. Iterate
 
-- **Edit** a liked mockup in place: the iframe reloads live.
+- **Start the next round** with `bin/round` (step 2) before touching any file.
+- **Edit** a liked mockup in place: the iframe reloads live and the mockup moves into the new round.
 - **Delete** rejected mockups.
 - **Add** new variants with fresh slugs (list the directory first to avoid collisions).
-- Go back to step 3 with the next round number.
+- Go back to step 3 with the feedback file the new round printed.
 
 ### Interpreting feedback
 
@@ -121,13 +131,14 @@ Too busy, hard to read
 
 - **Singleton**: one server on `127.0.0.1:10000` for all projects; each mockup directory is a workspace tab. Registrations survive server restarts.
 - **Security**: loopback only; requests with a foreign `Host` or `Origin` are refused.
-- **Rounds**: submitting (C) closes the round and writes `feedback-round-N.md`; resubmitting the same round overwrites that file.
+- **Rounds**: `bin/round` closes the open round and starts the next; pressing C on the open round also closes it. Both leave an empty round open, so numbers have no gaps. Round numbers match `feedback-round-N.md` and never restart within a directory. Resubmitting a round overwrites its file.
 - **Lifecycle**: the server runs detached from the Claude session; PID in `~/.claude/design-explorer.pid`, log in `~/.claude/design-explorer.log`.
 
 ## CLI tools
 
 ```bash
 ~/.claude/skills/design-explorer/bin/register --project /path --dir /tmp/claude/design-explorer/mockups/NAME [--branch main]
+~/.claude/skills/design-explorer/bin/round --dir /tmp/claude/design-explorer/mockups/NAME [--label TEXT]
 ~/.claude/skills/design-explorer/bin/status
 ~/.claude/skills/design-explorer/bin/stop
 ```

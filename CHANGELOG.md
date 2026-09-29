@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-29 — Explicit rounds
+
+### Problem
+Only pressing C closed a round. Feedback is usually given in chat, so every exploration since 24 September stayed in a single open round: `skard-visual-language` had three agent-written `feedback-round-N.md` files, but `sessions.json` held all 13 mockups in round 1 and the UI showed no round pills. Edited mockups also stayed in their original round, so a revision did not look new.
+
+### Solution
+- **`bin/round --dir DIR [--label TEXT]`** (`POST /round`) closes the open round and opens the next, printing the round number and its feedback file. The agent calls it once, before writing a batch. Unlike the March `batch/start`/`batch/end` pair there is no closing call to forget.
+- **Idempotent**: an empty open round is never closed, by `round` or by C, so repeats after compaction are harmless and round numbers have no gaps.
+- **Revisions move**: a mockup edited while a later round is open moves into it.
+- **C on an older round** writes that round's feedback without closing the open round.
+- **Pills** show the real round number (matching `feedback-round-N.md`) plus the label; a new round takes focus when its mockups arrive.
+- **SKILL.md**: start each round with `bin/round`; wait on the file it prints; treat chat feedback as the end of a round and never write feedback files by hand.
+
+---
+
 ## 2026-09-24 — Hardened server, per-session workspaces, feedback files per round
 
 - **Security**: bind to `127.0.0.1`; removed wildcard CORS; reject foreign `Host` (DNS rebinding) and foreign `Origin`/`Sec-Fetch-Site` (CSRF); POSTs must be JSON with a 1 MB cap; workspace directories must resolve (after symlinks) inside `/tmp/claude/design-explorer`; the harness page is `no-store` and cannot be framed. Mockup iframes are `sandbox="allow-scripts"`, and mockup HTML is parsed through an inert `<template>` so it never runs in the harness origin.
