@@ -89,6 +89,16 @@ Each mockup renders in a sandboxed iframe (`sandbox="allow-scripts"`): scripts r
 
 ### 3. Wait for feedback
 
+Run `~/.claude/skills/design-explorer/bin/lineup --dir "<MOCKUP_DIR>"` and paste the new round's lines into your reply:
+
+```
+Round 2 · two-column (open)
+  #2  Warm Editorial  (mockup-warm-editorial.html)
+  #6  Split Reader  (mockup-split-reader.html)
+```
+
+Every mockup has a **number that never changes** within its directory, shown as `#N` in the carousel. A revised mockup keeps its number and a deleted one's number is never reused. The pasted lineup puts the number-to-design mapping into the conversation, where you will need it when feedback arrives.
+
 Tell the user the mockups are live at `http://localhost:10000`: arrows navigate, ↑/↓ vote, Tab for notes, hold Space to dictate (if voice is set up), C to submit.
 
 Then wait for the feedback file that `round` printed instead of asking the user to paste. Start a Monitor (timeout 30 min) with:
@@ -113,15 +123,17 @@ The user often gives feedback in chat instead. Treat it the same way: stop the M
 ### Interpreting feedback
 
 ```
-### Warm Editorial (mockup-warm-editorial.html)  [👍]
+### #2 Warm Editorial (mockup-warm-editorial.html)  [👍]
 Love the dark palette, serif typography works well
 
-### Dense Dashboard (mockup-dense-dashboard.html)  [👎]
+### #4 Dense Dashboard (mockup-dense-dashboard.html)  [👎]
 Too busy, hard to read
 
 ### No feedback
-- Minimal Cards (mockup-minimal-cards.html)
+- #6 Minimal Cards (mockup-minimal-cards.html)
 ```
+
+- **Numbers identify designs, not positions.** "Number 4", "#4", "the fourth one" or "four" in chat or notes means the mockup numbered `#4`, never the fourth slide or the fourth file you wrote. Resolve every number against the latest `bin/lineup` output (run it again if unsure) and name the design back when you act on it ("#4 Dense Dashboard: dropping it"). If a number matches no mockup, ask; do not guess.
 
 - **👍** strong positive: build on it. **👎** rejection: drop it.
 - **No feedback**: not interesting enough to comment on; move away.
@@ -139,6 +151,7 @@ Too busy, hard to read
 ```bash
 ~/.claude/skills/design-explorer/bin/register --project /path --dir /tmp/claude/design-explorer/mockups/NAME [--branch main]
 ~/.claude/skills/design-explorer/bin/round --dir /tmp/claude/design-explorer/mockups/NAME [--label TEXT]
+~/.claude/skills/design-explorer/bin/lineup --dir /tmp/claude/design-explorer/mockups/NAME
 ~/.claude/skills/design-explorer/bin/status
 ~/.claude/skills/design-explorer/bin/stop
 ```

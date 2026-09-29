@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-29 — Stable mockup numbers
+
+### Problem
+The only number on screen was the carousel position (`3 / 5`), which depends on the selected round and on file arrival order. When feedback said "number 3", Claude had to guess which mockup that was.
+
+### Solution
+- **Stable numbers**: the server gives each mockup a number on first sight and keeps it in `numbers.json`; revisions keep it and deleted numbers are never reused. Older directories are numbered by round, then order within the round.
+- **Shown everywhere**: counter (`#7 Warm Editorial  2/3`), slide label and feedback headings (`### #7 Warm Editorial (mockup-warm-editorial.html)`). Slides are ordered by number.
+- **`bin/lineup --dir DIR`** (`GET /lineup`) prints the numbered mockups per round, newest first. SKILL.md has Claude paste it into its reply and resolve every number in feedback against it.
+
+---
+
 ## 2026-09-29 — Explicit rounds
 
 ### Problem

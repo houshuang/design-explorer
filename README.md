@@ -15,6 +15,8 @@ A [Claude Code skill](https://code.claude.com/docs/en/skills) for iterative desi
 
 **Global singleton**: One server on `127.0.0.1:10000` serves all projects. Each exploration uses its own mockup directory (`/tmp/claude/design-explorer/mockups/<repo>-<topic>-<time>`) and gets its own tab in the browser UI, so two sessions in the same repo never clobber each other.
 
+**Numbers**: every mockup has a number that never changes within its directory (`#7`), shown in the counter, on the slide and in the feedback file. Revisions keep their number; deleted numbers are not reused. Claude posts the `bin/lineup` list in chat, so "number 7" always means one design.
+
 **Rounds**: Claude runs `bin/round` before each batch, so every mockup it creates or revises afterwards lands in that round, and the newest round is selected automatically. Pressing `C` also closes the open round. Round pills carry the round number and a short label, e.g. `Round 3 · two-column`.
 
 **Auto-focus**: The browser automatically switches to the workspace and session with the most recent file additions.
@@ -123,6 +125,7 @@ If no key is found, voice is silently disabled and the mic button is hidden. Eve
 
 # Check server status and list workspaces
 ~/.claude/skills/design-explorer/bin/round --dir /path/mockups [--label TEXT]
+~/.claude/skills/design-explorer/bin/lineup --dir /path/mockups
 ~/.claude/skills/design-explorer/bin/status
 
 # Stop the server

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Print the numbered mockups of a registered directory, newest round first.
+# The numbers are the ones the user sees in the carousel and says aloud.
+#
+# Usage: lineup --dir /tmp/claude/design-explorer/mockups/NAME
+
+set -euo pipefail
+
+PORT=10000
+DIR=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir)  DIR="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+if [[ -z "$DIR" ]]; then
+  echo "Usage: lineup --dir /tmp/claude/design-explorer/mockups/NAME" >&2
+  exit 1
+fi
+
+RESULT=$(curl -s --max-time 5 -G "http://127.0.0.1:$PORT/lineup" --data-urlencode "dir=$DIR" || true)
+
+printf '%s' "$RESULT" | node -e '
+  let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+    let r;
+    try { r = JSON.parse(s); } catch {}
+    if (!r || !Array.isArray(r.rounds)) {
+      console.error("design-explorer: could not read the lineup: " + ((r && r.error) || s || "server not running; run bin/register first"));
+      process.exit(1);
+    }
+    if (!r.rounds.length) { console.log("No mockups yet."); return; }
+    for (const round of r.rounds) {
+      console.log(`Round ${round.round}${round.label ? " · " + round.label : ""}${round.open ? " (open)" : ""}`);
+      for (const m of round.mockups) console.log(`  #${m.number}  ${m.label}  (${m.file})`);
+    }
+  });'
