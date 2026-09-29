@@ -104,6 +104,24 @@ function saveSessions(ws) {
   } catch {}
 }
 
+// Each mockup keeps one number for the life of its directory, shown in the UI,
+// the feedback file and bin/lineup, so "number 7" always means the same design.
+// Numbers of deleted mockups are never reused.
+function numberFor(ws, mockupId) {
+  if (!ws.numbers.ids[mockupId]) {
+    ws.numbers.ids[mockupId] = ws.numbers.next++;
+    try {
+      fs.writeFileSync(path.join(ws.mockupDir, 'numbers.json'), JSON.stringify(ws.numbers, null, 2));
+    } catch {}
+  }
+  return ws.numbers.ids[mockupId];
+}
+
+function labelOf(html, mockupId) {
+  const m = html.match(/data-label\s*=\s*"([^"]*)"/);
+  return m && m[1].trim() ? m[1].trim() : mockupId;
+}
+
 function getOrCreateOpenSession(ws) {
   if (ws.openSessionId !== null) {
     const session = ws.sessions.find(s => s.id === ws.openSessionId);
@@ -178,15 +196,16 @@ function scanWorkspace(ws) {
       const id = file.replace('.html', '');
       let sessionId = sessionForMockup(ws, id);
       if (sessionId === null) sessionId = assignToOpenSession(ws, id);
-      ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session: sessionId });
-      changes.push({ type: 'add', id, html, session: sessionId, workspace: ws.id });
+      const number = numberFor(ws, id);
+      ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session: sessionId, number });
+      changes.push({ type: 'add', id, html, session: sessionId, number, workspace: ws.id });
     } else if (stat.mtimeMs > existing.mtime) {
       const html = fs.readFileSync(filePath, 'utf8');
       const id = file.replace('.html', '');
       const current = ws.sessions.find(s => s.id === existing.session);
       const sessionId = current && !current.closed ? current.id : assignToOpenSession(ws, id);
-      ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session: sessionId });
-      changes.push({ type: 'update', id, html, session: sessionId, workspace: ws.id });
+      ws.knownFiles.set(file, { ...existing, mtime: stat.mtimeMs, html, session: sessionId });
+      changes.push({ type: 'update', id, html, session: sessionId, number: existing.number, workspace: ws.id });
     }
   }
 
@@ -258,6 +277,7 @@ function createWorkspace(projectPath, branch, mockupDir) {
     watcher: null, watchTimeout: null, watchWorking: false,
     pollTimer: null, slowPollTimer: null,
     openSessionId: null,
+    numbers: { next: 1, ids: {} },
   };
 
   // Load existing sessions
@@ -270,6 +290,18 @@ function createWorkspace(projectPath, branch, mockupDir) {
       ws.openSessionId = lastSession.id;
     }
   } catch {}
+
+  try {
+    const numbers = JSON.parse(fs.readFileSync(path.join(ws.mockupDir, 'numbers.json'), 'utf8'));
+    if (numbers && numbers.ids && Number.isInteger(numbers.next)) ws.numbers = numbers;
+  } catch {
+    // Directories from before numbering: number by round, then order within it.
+    for (const session of ws.sessions) {
+      for (const id of session.mockups) {
+        if (fs.existsSync(path.join(ws.mockupDir, id + '.html'))) numberFor(ws, id);
+      }
+    }
+  }
 
   startWatching(ws);
   workspaces.set(id, ws);
@@ -417,7 +449,7 @@ const server = http.createServer(async (req, res) => {
       for (const [file, data] of ws.knownFiles) {
         res.write(`event: add\ndata: ${JSON.stringify({
           id: file.replace('.html', ''), html: data.html,
-          session: data.session, workspace: id,
+          session: data.session, number: data.number, workspace: id,
         })}\n\n`);
       }
       for (const session of ws.sessions) {
@@ -468,6 +500,21 @@ const server = http.createServer(async (req, res) => {
     if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
     sendJson(res, 200, getOrCreateOpenSession(ws) || {});
 
+  // ── Lineup: numbered mockups per round (bin/lineup) ──
+  } else if (req.method === 'GET' && url.pathname === '/lineup') {
+    const mockupDir = resolveMockupDir(url.searchParams.get('dir'));
+    const ws = mockupDir && [...workspaces.values()].find(w => w.mockupDir === mockupDir);
+    if (!ws) { sendJson(res, 404, { error: 'dir is not registered; run bin/register first' }); return; }
+    pushWorkspaceChanges(ws);
+    const rounds = ws.sessions.map(session => ({
+      round: session.id, label: session.label || '', open: !session.closed,
+      mockups: [...ws.knownFiles]
+        .filter(([, data]) => data.session === session.id)
+        .map(([file, data]) => ({ number: data.number, label: labelOf(data.html, file.replace('.html', '')), file }))
+        .sort((a, b) => a.number - b.number),
+    })).filter(r => r.mockups.length > 0).reverse();
+    sendJson(res, 200, { rounds });
+
   // ── Start a new round (bin/round) ─────────────
   } else if (req.method === 'POST' && url.pathname === '/round') {
     const body = await readBody(req);
@@ -515,6 +562,7 @@ const server = http.createServer(async (req, res) => {
         id: file.replace('.html', ''),
         filename: file,
         session: data.session,
+        number: data.number,
         html: data.html,
       });
     }

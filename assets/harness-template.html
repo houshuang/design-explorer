@@ -51,6 +51,8 @@
       background: rgba(255,255,255,0.92); padding: 5px 14px; border-radius: 20px;
       backdrop-filter: blur(8px); box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     }
+    .counter-number { color: #111; font-size: 16px; margin-right: 2px; }
+    .counter-pos { color: #aaa; font-weight: 400; font-size: 12px; margin-left: 6px; }
     #sessions {
       position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 100;
       display: flex; gap: 4px;
@@ -276,7 +278,7 @@
       let filtered = mockups;
       if (currentWorkspace !== null) filtered = filtered.filter(m => m.workspace === currentWorkspace);
       if (currentSession !== null) filtered = filtered.filter(m => m.session === currentSession);
-      return filtered;
+      return [...filtered].sort((a, b) => a.number - b.number);
     }
 
     function visibleIndices() {
@@ -335,7 +337,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       const label = document.createElement('div');
       label.className = 'slide-label';
       const labelSpan = document.createElement('span');
-      labelSpan.textContent = mockup.label;
+      labelSpan.textContent = `#${mockup.number} · ${mockup.label}`;
       label.appendChild(labelSpan);
 
       const content = document.createElement('div');
@@ -361,9 +363,19 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
 
       emptyState.style.display = hasSlides ? 'none' : 'block';
       bottomBar.style.display = hasSlides ? 'block' : 'none';
-      counterEl.textContent = hasSlides ? `${currentIndex + 1} / ${vis.length}` : '';
-
       const m = currentMockup();
+      counterEl.innerHTML = '';
+      if (m) {
+        // The design's own number, not its position, so spoken feedback maps to one mockup.
+        const num = document.createElement('span');
+        num.className = 'counter-number';
+        num.textContent = `#${m.number}`;
+        const pos = document.createElement('span');
+        pos.className = 'counter-pos';
+        pos.textContent = `${currentIndex + 1}/${vis.length}`;
+        counterEl.append(num, ` ${m.label} `, pos);
+      }
+
       if (!m) return;
 
       // Vote buttons
@@ -525,13 +537,13 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         const vote = m.vote === 'up' ? '👍' : m.vote === 'down' ? '👎' : '—';
         const hasNotes = m.notes && m.notes.trim();
         if (!hasNotes && !m.vote) continue;
-        let section = `### ${m.label} (${m.id}.html)  [${vote}]`;
+        let section = `### #${m.number} ${m.label} (${m.id}.html)  [${vote}]`;
         if (hasNotes) section += '\n' + m.notes.trim();
         sections.push(section);
       }
       const untouched = vis.filter(m => !m.vote && !(m.notes && m.notes.trim()));
       if (untouched.length) {
-        sections.push('### No feedback\n' + untouched.map(m => `- ${m.label} (${m.id}.html)`).join('\n'));
+        sections.push('### No feedback\n' + untouched.map(m => `- #${m.number} ${m.label} (${m.id}.html)`).join('\n'));
       }
       return sections.join('\n\n').trim();
     }
@@ -918,6 +930,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         label: parsed.label || data.id,
         contentHtml: parsed.contentHtml,
         session: data.session || 0,
+        number: data.number || 0,
         workspace: data.workspace || null,
         vote: null,
         notes: '',
@@ -944,7 +957,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         const iframe = slides[idx].querySelector('iframe');
         const label = slides[idx].querySelector('.slide-label');
         if (iframe) iframe.srcdoc = buildIframeSrc(parsed.contentHtml, data.id);
-        if (label) label.textContent = mockups[idx].label;
+        if (label) label.textContent = `#${mockups[idx].number} · ${mockups[idx].label}`;
       }
       updateUI();
       if (data.session) updateSessionPills();

@@ -254,6 +254,48 @@ test('bin/round starts rounds explicitly; new and revised mockups land in the op
   }
 });
 
+function lineup(dir) {
+  return new Promise((resolve) => {
+    execFile(path.join(REPO, 'bin', 'lineup'), ['--dir', dir, '--port', String(PORT)], { env },
+      (err, stdout, stderr) => resolve({ code: err ? err.code : 0, stdout: stdout.trim(), stderr }));
+  });
+}
+
+test('mockups keep one number per directory; bin/lineup maps numbers to files', async () => {
+  const dir = `${MOCKUP_DIR}-numbers`;
+  fs.mkdirSync(dir, { recursive: true });
+  const labelled = (id, label) => `<section class="mockup-section" data-mockup-id="${id}" data-label="${label}"><p>${id}</p></section>`;
+  try {
+    assert.equal((await register(['--project', REPO, '--dir', dir, '--port', String(PORT)])).code, 0);
+    await round(['--dir', dir, '--label', 'first ideas']);
+    fs.writeFileSync(path.join(dir, 'mockup-b.html'), labelled('mockup-b', 'Bold Grid'));
+    fs.writeFileSync(path.join(dir, 'mockup-a.html'), labelled('mockup-a', 'Airy List'));
+    await waitForSessions(dir, (s) => s.length === 1 && s[0].mockups.length === 2);
+
+    await round(['--dir', dir, '--label', 'revisions']);
+    fs.rmSync(path.join(dir, 'mockup-b.html'));
+    fs.writeFileSync(path.join(dir, 'mockup-c.html'), labelled('mockup-c', 'Calm Cards'));
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(path.join(dir, 'mockup-a.html'), later, later);
+    await waitForSessions(dir, (s) => s.length === 2 && s[1].mockups.length === 2);
+
+    // a and b were numbered 1 and 2; b's number is retired, a keeps 1 after its revision.
+    assert.equal((await lineup(dir)).stdout, [
+      'Round 2 · revisions (open)',
+      '  #1  Airy List  (mockup-a.html)',
+      '  #3  Calm Cards  (mockup-c.html)',
+    ].join('\n'));
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'numbers.json'), 'utf8')),
+      { next: 4, ids: { 'mockup-a': 1, 'mockup-b': 2, 'mockup-c': 3 } });
+
+    const events = (await request({ pathname: `/events?workspace=${path.basename(dir)}`, headers: { Accept: 'text/event-stream' } })).body;
+    assert.match(events, /"id":"mockup-c".*"number":3/);
+  } finally {
+    await request({ method: 'DELETE', pathname: `/workspace/${path.basename(dir)}` });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('bin/round fails loudly for an unregistered directory', async () => {
   const dir = `${MOCKUP_DIR}-unregistered`;
   fs.mkdirSync(dir, { recursive: true });
