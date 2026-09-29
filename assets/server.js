@@ -122,6 +122,23 @@ function labelOf(html, mockupId) {
   return m && m[1].trim() ? m[1].trim() : mockupId;
 }
 
+function lineupRounds(ws) {
+  return ws.sessions.map(session => ({
+    round: session.id, label: session.label || '', open: !session.closed,
+    mockups: [...ws.knownFiles]
+      .filter(([, data]) => data.session === session.id)
+      .map(([file, data]) => ({ number: data.number, label: labelOf(data.html, file.replace('.html', '')), file }))
+      .sort((a, b) => a.number - b.number),
+  })).filter(r => r.mockups.length > 0).reverse();
+}
+
+function formatLineup(rounds) {
+  return rounds.map(r => [
+    `Round ${r.round}${r.label ? ' · ' + r.label : ''}${r.open ? ' (open)' : ''}`,
+    ...r.mockups.map(m => `  #${m.number}  ${m.label}  (${m.file})`),
+  ].join('\n')).join('\n');
+}
+
 function getOrCreateOpenSession(ws) {
   if (ws.openSessionId !== null) {
     const session = ws.sessions.find(s => s.id === ws.openSessionId);
@@ -506,14 +523,8 @@ const server = http.createServer(async (req, res) => {
     const ws = mockupDir && [...workspaces.values()].find(w => w.mockupDir === mockupDir);
     if (!ws) { sendJson(res, 404, { error: 'dir is not registered; run bin/register first' }); return; }
     pushWorkspaceChanges(ws);
-    const rounds = ws.sessions.map(session => ({
-      round: session.id, label: session.label || '', open: !session.closed,
-      mockups: [...ws.knownFiles]
-        .filter(([, data]) => data.session === session.id)
-        .map(([file, data]) => ({ number: data.number, label: labelOf(data.html, file.replace('.html', '')), file }))
-        .sort((a, b) => a.number - b.number),
-    })).filter(r => r.mockups.length > 0).reverse();
-    sendJson(res, 200, { rounds });
+    const rounds = lineupRounds(ws);
+    sendJson(res, 200, { rounds, text: formatLineup(rounds) });
 
   // ── Start a new round (bin/round) ─────────────
   } else if (req.method === 'POST' && url.pathname === '/round') {
@@ -542,9 +553,12 @@ const server = http.createServer(async (req, res) => {
     const round = session ? session.id : 1;
     const feedbackPath = path.join(ws.mockupDir, `feedback-round-${round}.md`);
     try {
-      fs.writeFileSync(feedbackPath, typeof body.content === 'string' ? body.content : '');
       // Feedback on the open round closes it; the next files start a new one.
       if (session && session.id === ws.openSessionId) closeOpenSession(ws);
+      // The lineup travels with the feedback, so "#4" in the notes resolves to a file.
+      const lineup = formatLineup(lineupRounds(ws));
+      const content = typeof body.content === 'string' ? body.content : '';
+      fs.writeFileSync(feedbackPath, lineup ? `${content}\n\n# Lineup\n${lineup}\n` : content);
       ws.lastActive = Date.now();
       sendJson(res, 200, { path: feedbackPath, round });
     } catch (e) {

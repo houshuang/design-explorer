@@ -187,7 +187,8 @@ test('full cycle: register -> mockup served -> feedback-round-1.md written', asy
     headers: { ...json, Origin: `http://localhost:${PORT}` }, body: { content } });
   assert.equal(r.status, 200, r.body);
   assert.equal(JSON.parse(r.body).round, 1);
-  assert.equal(fs.readFileSync(path.join(MOCKUP_DIR, 'feedback-round-1.md'), 'utf8'), content);
+  assert.equal(fs.readFileSync(path.join(MOCKUP_DIR, 'feedback-round-1.md'), 'utf8'),
+    `${content}\n\n# Lineup\nRound 1\n  #1  Test Card  (mockup-test-card.html)\n`);
   assert.ok(!fs.existsSync(path.join(MOCKUP_DIR, 'feedback.md')));
 });
 
@@ -285,6 +286,10 @@ test('mockups keep one number per directory; bin/lineup maps numbers to files', 
       '  #1  Airy List  (mockup-a.html)',
       '  #3  Calm Cards  (mockup-c.html)',
     ].join('\n'));
+    // Re-registering a directory with mockups shows the lineup on stderr; stdout stays the ID.
+    const again = await register(['--project', REPO, '--dir', dir, '--port', String(PORT)]);
+    assert.equal(again.stdout, path.basename(dir));
+    assert.match(again.stderr, /Existing mockups:\nRound 2 · revisions \(open\)\n  #1  Airy List/);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'numbers.json'), 'utf8')),
       { next: 4, ids: { 'mockup-a': 1, 'mockup-b': 2, 'mockup-c': 3 } });
 
