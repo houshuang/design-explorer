@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-29 — Lineup wherever Claude looks
+
+- `feedback-round-N.md` ends with a `# Lineup` section (every mockup's number, label and file), so numbers in notes resolve without a separate call.
+- `bin/register` prints the lineup on stderr when the directory already has mockups; stdout stays the workspace ID.
+- The server formats the lineup once (`formatLineup`); `bin/lineup` prints the server's text.
+
+---
+
 ## 2026-09-29 — Stable mockup numbers
 
 ### Problem

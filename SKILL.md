@@ -39,7 +39,7 @@ mkdir -p "$MOCKUP_DIR" && echo "$MOCKUP_DIR"
 
 `{topic-slug}` is 1–3 words, e.g. `settings-page`. Shell variables do not persist between Bash calls, so note the printed `MOCKUP_DIR` and use the literal path from now on. To continue an earlier exploration, reuse its directory instead of creating a new one.
 
-`register` starts the server if needed (always `http://localhost:10000`), restarts it if the installed code changed, and prints the workspace ID. Each directory gets its own tab in the UI. If it fails, it prints the reason and the log path (`~/.claude/design-explorer.log`); report that to the user rather than working around it.
+When the directory already has mockups, `register` also prints their numbered lineup (see step 3), so a resumed exploration starts with the mapping. `register` starts the server if needed (always `http://localhost:10000`), restarts it if the installed code changed, and prints the workspace ID. Each directory gets its own tab in the UI. If it fails, it prints the reason and the log path (`~/.claude/design-explorer.log`); report that to the user rather than working around it.
 
 ### 2. Plan, then generate
 
@@ -133,7 +133,8 @@ Too busy, hard to read
 - #6 Minimal Cards (mockup-minimal-cards.html)
 ```
 
-- **Numbers identify designs, not positions.** "Number 4", "#4", "the fourth one" or "four" in chat or notes means the mockup numbered `#4`, never the fourth slide or the fourth file you wrote. Resolve every number against the latest `bin/lineup` output (run it again if unsure) and name the design back when you act on it ("#4 Dense Dashboard: dropping it"). If a number matches no mockup, ask; do not guess.
+- The file ends with a `# Lineup` section listing every current mockup's number, label and file.
+- **Numbers identify designs, not positions.** "Number 4", "#4", "the fourth one" or "four" in chat or notes means the mockup numbered `#4`, never the fourth slide or the fourth file you wrote. Resolve every number against the latest lineup (the feedback file's, or `bin/lineup` for chat feedback) and name the design back when you act on it ("#4 Dense Dashboard: dropping it"). If a number matches no mockup, ask; do not guess.
 
 - **👍** strong positive: build on it. **👎** rejection: drop it.
 - **No feedback**: not interesting enough to comment on; move away.

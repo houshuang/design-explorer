@@ -32,9 +32,5 @@ printf '%s' "$RESULT" | node -e '
       console.error("design-explorer: could not read the lineup: " + ((r && r.error) || s || "server not running; run bin/register first"));
       process.exit(1);
     }
-    if (!r.rounds.length) { console.log("No mockups yet."); return; }
-    for (const round of r.rounds) {
-      console.log(`Round ${round.round}${round.label ? " · " + round.label : ""}${round.open ? " (open)" : ""}`);
-      for (const m of round.mockups) console.log(`  #${m.number}  ${m.label}  (${m.file})`);
-    }
+    console.log(r.text || "No mockups yet.");
   });'

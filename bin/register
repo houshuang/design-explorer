@@ -121,3 +121,9 @@ if [[ -z "$WORKSPACE_ID" ]]; then
 fi
 
 echo "$WORKSPACE_ID"
+
+# Resuming a directory: show the numbered mockups on stderr (stdout stays the ID).
+curl -s --max-time 5 -G "$BASE/lineup" --data-urlencode "dir=$DIR" 2>/dev/null | node -e '
+  let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+    try { const r = JSON.parse(s); if (r.text) console.error("Existing mockups:\n" + r.text); } catch {}
+  });' || true
