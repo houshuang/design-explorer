@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Start a new review round in a registered mockup directory. Run it before
+# writing the round's mockups: files created or edited afterwards form the round.
+# Idempotent while the new round is still empty. Prints the round number and
+# the feedback file to wait for.
+#
+# Usage: round --dir /tmp/claude/design-explorer/mockups/NAME [--label "two-column layouts"]
+
+set -euo pipefail
+
+PORT=10000
+DIR=""
+LABEL=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir)   DIR="$2"; shift 2 ;;
+    --label) LABEL="$2"; shift 2 ;;
+    --port)  PORT="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+if [[ -z "$DIR" ]]; then
+  echo "Usage: round --dir /tmp/claude/design-explorer/mockups/NAME [--label TEXT]" >&2
+  exit 1
+fi
+
+BODY=$(node -e 'console.log(JSON.stringify({ mockupDir: process.argv[1], label: process.argv[2] }))' "$DIR" "$LABEL")
+
+RESULT=$(curl -s --max-time 5 -X POST "http://127.0.0.1:$PORT/round" \
+  -H 'Content-Type: application/json' --data-binary "$BODY" || true)
+
+printf '%s' "$RESULT" | node -e '
+  let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+    let r;
+    try { r = JSON.parse(s); } catch {}
+    if (!r || !r.round) {
+      console.error("design-explorer: could not start a round: " + ((r && r.error) || s || "server not running; run bin/register first"));
+      process.exit(1);
+    }
+    console.log(`Round ${r.round}${r.label ? " · " + r.label : ""}`);
+    console.log(`Feedback file: ${r.feedback}`);
+  });'

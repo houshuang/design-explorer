@@ -247,6 +247,7 @@
     const mockups = [];     // [{id, label, contentHtml, session, workspace, vote, notes}]
     let currentIndex = 0;   // index into visible mockups
     let currentSession = null;
+    const sessionLabels = new Map(); // `${workspace}:${id}` → label
     let currentWorkspace = null; // workspace ID or null (show all)
     let knownWorkspaces = [];    // [{id, projectName, branch, mockups, lastActive}]
     let notesActive = false;
@@ -821,6 +822,10 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       es.addEventListener('session-closed', () => { hasUserSelectedSession = false; });
       es.addEventListener('session', (e) => {
         const data = JSON.parse(e.data);
+        const key = `${data.workspace}:${data.id}`;
+        // A new round takes focus once its mockups arrive.
+        if (initialized && !sessionLabels.has(key)) hasUserSelectedSession = false;
+        sessionLabels.set(key, data.label || '');
         // Update mockup session assignments
         if (data.mockups) {
           for (const mockupId of data.mockups) {
@@ -932,6 +937,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       const parsed = parseMockupHtml(data.html);
       mockups[idx].contentHtml = parsed.contentHtml;
       mockups[idx].label = parsed.label || mockups[idx].label;
+      if (data.session) mockups[idx].session = data.session;
 
       const slides = carousel.querySelectorAll('.slide');
       if (slides[idx]) {
@@ -941,6 +947,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         if (label) label.textContent = mockups[idx].label;
       }
       updateUI();
+      if (data.session) updateSessionPills();
     }
 
     function removeMockup(id) {
@@ -993,11 +1000,12 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       allPill.onclick = () => { hasUserSelectedSession = true; currentSession = null; currentIndex = 0; goTo(0); updateSessionPills(); };
       sessionsEl.appendChild(allPill);
 
-      for (let i = 0; i < sessionIds.length; i++) {
-        const s = sessionIds[i];
+      for (const s of sessionIds) {
         const pill = document.createElement('button');
         pill.className = 'session-pill' + (currentSession === s ? ' active' : '');
-        pill.textContent = `Round ${i + 1}`;
+        // Numbers match feedback-round-N.md, so they skip a round whose mockups were all deleted or revised.
+        const label = sessionLabels.get(`${currentWorkspace}:${s}`);
+        pill.textContent = label ? `Round ${s} · ${label}` : `Round ${s}`;
         pill.onclick = () => {
           hasUserSelectedSession = true;
           currentSession = currentSession === s ? null : s;

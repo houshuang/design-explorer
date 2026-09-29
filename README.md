@@ -15,7 +15,7 @@ A [Claude Code skill](https://code.claude.com/docs/en/skills) for iterative desi
 
 **Global singleton**: One server on `127.0.0.1:10000` serves all projects. Each exploration uses its own mockup directory (`/tmp/claude/design-explorer/mockups/<repo>-<topic>-<time>`) and gets its own tab in the browser UI, so two sessions in the same repo never clobber each other.
 
-**Feedback-driven sessions**: All mockups written before you submit feedback belong to one round. When you press `C` (submit), the session closes — any new mockups from Claude's next iteration automatically start a new round. No manual session management needed.
+**Rounds**: Claude runs `bin/round` before each batch, so every mockup it creates or revises afterwards lands in that round, and the newest round is selected automatically. Pressing `C` also closes the open round. Round pills carry the round number and a short label, e.g. `Round 3 · two-column`.
 
 **Auto-focus**: The browser automatically switches to the workspace and session with the most recent file additions.
 
@@ -107,7 +107,7 @@ If no key is found, voice is silently disabled and the mic button is hidden. Eve
 
 **Pre-loaded harness**: Every iframe includes Tailwind CSS (full JIT), 11 Google Fonts (Inter, DM Sans, Space Grotesk, Syne, Cormorant Garamond, EB Garamond, Crimson Pro, Playfair Display, Instrument Serif, JetBrains Mono, Space Mono), and Lucide icons — so mockups stay compact and token-efficient.
 
-**Feedback-driven sessions**: All new mockup files go into the current "open session." When the user presses `C` (Submit), the session closes and feedback is written to `{mockupDir}/feedback-round-N.md`. Any new files arriving after that automatically start a new session. No timers or batch coordination needed — the user's feedback action is the natural session boundary. The UI auto-focuses on the workspace and session with the most recent activity.
+**Rounds**: New and edited mockup files go into the open round. `POST /round` (via `bin/round`) closes it and opens the next; submitting feedback (`C`) on the open round closes it too. An empty open round is never closed, so the call is idempotent and numbers have no gaps. Feedback is written to `{mockupDir}/feedback-round-N.md`. Explicit start-of-round signalling replaced the C-only boundary because feedback given in chat never closed a round. The UI auto-focuses on the workspace and round with the most recent activity.
 
 **Security**: The server binds to `127.0.0.1` only and sends no CORS headers. It refuses requests whose `Host` is not `localhost`/`127.0.0.1` on its port (DNS rebinding) and requests from any other origin (CSRF); POSTs must be `application/json`. Workspaces can only point at existing directories inside `/tmp/claude/design-explorer` (checked after resolving symlinks). The Soniox key is only embedded in the page served to same-origin loopback requests.
 
@@ -122,6 +122,7 @@ If no key is found, voice is silently disabled and the mic button is hidden. Eve
 ~/.claude/skills/design-explorer/bin/register --project /path --dir /path/mockups [--branch main]
 
 # Check server status and list workspaces
+~/.claude/skills/design-explorer/bin/round --dir /path/mockups [--label TEXT]
 ~/.claude/skills/design-explorer/bin/status
 
 # Stop the server

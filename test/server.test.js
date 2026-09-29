@@ -191,6 +191,81 @@ test('full cycle: register -> mockup served -> feedback-round-1.md written', asy
   assert.ok(!fs.existsSync(path.join(MOCKUP_DIR, 'feedback.md')));
 });
 
+function round(args) {
+  return new Promise((resolve) => {
+    execFile(path.join(REPO, 'bin', 'round'), [...args, '--port', String(PORT)], { env },
+      (err, stdout, stderr) => resolve({ code: err ? err.code : 0, stdout: stdout.trim(), stderr }));
+  });
+}
+
+async function waitForSessions(dir, predicate) {
+  let sessions = [];
+  for (let i = 0; i < 30; i++) {
+    try { sessions = JSON.parse(fs.readFileSync(path.join(dir, 'sessions.json'), 'utf8')); } catch {}
+    if (predicate(sessions)) return sessions;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.fail(`sessions.json never matched: ${JSON.stringify(sessions)}`);
+}
+
+const mockup = (id) => `<section class="mockup-section" data-mockup-id="${id}" data-label="${id}"><p>${id}</p></section>`;
+
+test('bin/round starts rounds explicitly; new and revised mockups land in the open round', async () => {
+  const dir = `${MOCKUP_DIR}-rounds`;
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    assert.equal((await register(['--project', REPO, '--dir', dir, '--port', String(PORT)])).code, 0);
+    const wsId = path.basename(dir);
+
+    assert.match((await round(['--dir', dir])).stdout, /^Round 1\nFeedback file: .*feedback-round-1\.md$/);
+    // Idempotent while empty; a repeat call only sets the label.
+    assert.match((await round(['--dir', dir, '--label', 'first ideas'])).stdout, /^Round 1 · first ideas\n/);
+
+    fs.writeFileSync(path.join(dir, 'mockup-a.html'), mockup('mockup-a'));
+    fs.writeFileSync(path.join(dir, 'mockup-b.html'), mockup('mockup-b'));
+    await waitForSessions(dir, (s) => s.length === 1 && s[0].mockups.length === 2);
+
+    assert.match((await round(['--dir', dir, '--label', 'revisions'])).stdout, /^Round 2 · revisions\n/);
+    assert.match((await round(['--dir', dir])).stdout, /^Round 2 · revisions\n/);
+
+    fs.writeFileSync(path.join(dir, 'mockup-c.html'), mockup('mockup-c'));
+    const later = new Date(Date.now() + 5000);
+    fs.writeFileSync(path.join(dir, 'mockup-a.html'), mockup('mockup-a') + '\n');
+    fs.utimesSync(path.join(dir, 'mockup-a.html'), later, later);
+    const sessions = await waitForSessions(dir, (s) => s.length === 2 && s[1].mockups.length === 2);
+    assert.deepEqual(sessions[0].mockups, ['mockup-b']);
+    assert.equal(sessions[0].closed, true);
+    assert.deepEqual([...sessions[1].mockups].sort(), ['mockup-a', 'mockup-c']);
+
+    // Feedback on an older round leaves the open round alone.
+    const post = (session) => request({ method: 'POST', pathname: `/workspace/${wsId}/feedback`,
+      headers: { ...json, Origin: `http://localhost:${PORT}` }, body: { content: 'x', session } });
+    assert.equal(JSON.parse((await post(1)).body).round, 1);
+    await waitForSessions(dir, (s) => s[1].closed === false);
+
+    // Feedback on the open round closes it; the next round is 3, and stays 3 while empty.
+    assert.equal(JSON.parse((await post(2)).body).round, 2);
+    assert.match((await round(['--dir', dir])).stdout, /^Round 3\n/);
+    await post(3);
+    assert.match((await round(['--dir', dir])).stdout, /^Round 3\n/);
+  } finally {
+    await request({ method: 'DELETE', pathname: `/workspace/${path.basename(dir)}` });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('bin/round fails loudly for an unregistered directory', async () => {
+  const dir = `${MOCKUP_DIR}-unregistered`;
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    const r = await round(['--dir', dir]);
+    assert.notEqual(r.code, 0);
+    assert.match(r.stderr, /not registered/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('register restarts a server whose code differs and keeps registrations', async () => {
   const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'de-copy-'));
   fs.cpSync(path.join(REPO, 'bin'), path.join(copy, 'bin'), { recursive: true });
