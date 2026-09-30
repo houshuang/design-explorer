@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-30 — Shared inputs and revision-aware review
+
+- Rewrote the skill around the review decision, progressive format documentation, reuse of fixed content, and mandatory visual/interaction inspection. Full HTML remains available.
+- Added shared styles/data/local images and optional JSON slot or CSS variants, dependency-aware recomposition, immutable revision snapshots and persistent brief constraints.
+- Added begin/context/bounded-feedback helpers, version-specific autosave, neutral and unseen states, pinned/previous/archived comparisons, viewport controls and point notes.
+- Scoped design identity by workspace, stopped new activity stealing focus, bound voice finalisation to its originating revision, and report failed submissions honestly.
+- Added runtime/browser tests and reproducible real-model generation, tool workflow, rendering and blind quality evaluation. Narrow paired cases saved 49–56% of output; broad layouts did not retain savings after equal repairs. See eval/README.md for scope and limitations.
+
+---
+
 ## 2026-09-29 — Lineup wherever Claude looks
 
 - `feedback-round-N.md` ends with a `# Lineup` section (every mockup's number, label and file), so numbers in notes resolve without a separate call.

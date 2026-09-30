@@ -88,12 +88,12 @@
 
     /* ── Carousel ────────────────────────────── */
     #carousel {
-      display: flex; height: 100vh;
+      display: flex; height: calc(100vh - var(--review-bar-height, 120px));
       transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .slide {
-      min-width: 100vw; height: 100vh; display: flex; justify-content: center;
-      overflow-y: auto; padding: 56px 32px 210px;
+      min-width: 100vw; height: 100%; display: flex; justify-content: center;
+      overflow-y: auto; padding: 56px 32px 32px;
     }
     body.fit-mode .slide {
       overflow: hidden; align-items: flex-start; padding-top: 48px; padding-bottom: 0;
@@ -163,6 +163,7 @@
     #mic-btn.recording { animation: pulse 1.2s ease-in-out infinite; }
 
     #waveform {
+      pointer-events: none;
       position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%);
       width: 200px; height: 40px; border-radius: 10px;
       background: rgba(255,255,255,0.95); backdrop-filter: blur(8px);
@@ -205,14 +206,30 @@
     }
     #empty-state h2 { font-weight: 400; font-size: 20px; margin-bottom: 6px; }
     #empty-state p { font-size: 14px; }
+    #review-header {position:fixed;top:0;left:0;right:0;z-index:110;background:#f5f5f5ee;padding:12px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;backdrop-filter:blur(10px)}
+    body.has-workspaces #review-header {top:36px}
+    #review-header #counter,#review-header #sessions,#review-header #fit-btn,#review-header #submit-btn {position:static;transform:none}
+    #review-header #counter {font-size:12px;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #review-header #sessions {flex:1;overflow-x:auto;white-space:nowrap}
+    #review-question {width:100%;font-size:13px;color:#555;line-height:1.4}
+    .slide,body.has-workspaces .slide {padding-top:120px;padding-bottom:190px;overflow-x:auto}
+    .slide-inner {flex-shrink:0}
+    #review-tools {display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;font-size:12px}
+    #review-tools button,#review-tools select {font:inherit;border:1px solid #ddd;border-radius:6px;background:#fff;padding:5px 9px;color:#555}
+    #review-tools button[aria-pressed="true"] {background:#333;color:#fff}
+    #review-status {color:#777;min-height:16px;font-size:12px;text-align:center;margin-top:6px}
+    #review-status.error {color:#b42318}
+    .slide-content.side-by-side {display:flex;gap:16px;align-items:flex-start}
+    .slide-content iframe {flex-shrink:0}
+    @media(max-width:700px){#review-header #counter{max-width:100%;flex:1}#review-header #sessions{order:4;flex-basis:100%}.slide,body.has-workspaces .slide{padding-left:8px;padding-right:8px;padding-top:156px}#review-tools{gap:4px}#review-question{font-size:12px}}
   </style>
 </head>
 <body>
   <div id="workspace-bar"></div>
-  <div id="counter"></div>
+  <header id="review-header"><div id="counter"></div>
   <div id="sessions"></div>
   <button id="fit-btn" title="Fit to window (F)">Fit</button>
-  <button id="submit-btn" title="Submit feedback (C)">Submit</button>
+  <button id="submit-btn" title="Submit feedback (C)">Submit</button><div id="review-question"></div></header>
 
   <div id="carousel"></div>
 
@@ -222,12 +239,22 @@
   </div>
 
   <div id="bottom-bar" style="display:none">
+    <div id="review-tools">
+      <label>Width <select id="viewport"><option value="default">Product</option><option value="auto">Window</option><option value="390">390</option><option value="768">768</option><option value="1280">1280</option></select></label>
+      <button id="pin-btn" title="Keep this version as a comparison reference">Pin</button>
+      <label>Reference <select id="reference"><option value="">Choose…</option></select></label>
+      <button id="compare-btn" title="Switch A/B at the same width (A)" disabled>A/B</button>
+      <button id="side-btn" title="Compare at fixed widths side by side" disabled>Side by side</button>
+      <button id="point-btn" title="Click a preview element to anchor your note">Point and note</button>
+    </div>
     <div id="bottom-inner">
       <button class="vote-btn" id="btn-up" title="Like (↑)">👍</button>
+      <button class="vote-btn" id="btn-neutral" title="Reviewed, no preference">—</button>
       <button class="vote-btn" id="btn-down" title="Dislike (↓)">👎</button>
       <textarea id="notes" placeholder="Notes… (Tab to focus)" rows="1"></textarea>
       <div id="mic-btn" title="Hold Space to record">🎤</div>
     </div>
+    <div id="review-status" role="status" aria-live="polite"></div>
     <canvas id="waveform" width="200" height="40"></canvas>
   </div>
 
@@ -238,7 +265,9 @@
     <div class="sc-row sc-voice"><span class="sc-key">Hold <kbd>Space</kbd></span><span class="sc-label">Voice note</span></div>
     <div class="sc-row"><span class="sc-key"><kbd>Tab</kbd></span><span class="sc-label">Focus notes</span></div>
     <div class="sc-row"><span class="sc-key"><kbd>F</kbd></span><span class="sc-label">Fit to window</span></div>
-    <div class="sc-row"><span class="sc-key"><kbd>C</kbd></span><span class="sc-label">Copy feedback</span></div>
+    <div class="sc-row"><span class="sc-key"><kbd>C</kbd></span><span class="sc-label">Submit feedback</span></div>
+    <div class="sc-row"><span class="sc-key"><kbd>A</kbd></span><span class="sc-label">Switch comparison</span></div>
+    <div class="sc-row"><span class="sc-key">Alt + arrows</span><span class="sc-label">Review inside preview</span></div>
     <div class="sc-row"><span class="sc-key"><kbd>?</kbd></span><span class="sc-label">This help</span></div>
   </div>
 
@@ -250,12 +279,20 @@
     let currentIndex = 0;   // index into visible mockups
     let currentSession = null;
     const sessionLabels = new Map(); // `${workspace}:${id}` → label
-    let currentWorkspace = null; // workspace ID or null (show all)
+    let currentWorkspace = new URLSearchParams(location.search).get('workspace'); // workspace ID or null (show all)
     let knownWorkspaces = [];    // [{id, projectName, branch, mockups, lastActive}]
     let notesActive = false;
     let recording = false;
     let hasUserSelectedSession = false;
     let initialized = false;
+    const briefs = new Map();
+    const drafts = new Map();
+    const saveTimers = new Map();
+    const pendingWorkspaces = new Set();
+    let pinned = null, comparison = null, compareMode = false, sideMode = false, pointMode = false;
+    let comparisonGeneration = 0;
+    const identity = m => `${m.workspace}:${m.id}`;
+    const draftKey = m => `${identity(m)}:r${m.revision}`;
 
     // ── DOM refs ─────────────────────────────────
     const $ = (s) => document.getElementById(s);
@@ -273,6 +310,14 @@
     const helpBtn     = $('help-btn');
     const helpOverlay = $('shortcuts-overlay');
     const workspaceBar = $('workspace-bar');
+    const neutralBtn = $('btn-neutral');
+    const statusEl = $('review-status');
+    const referenceEl = $('reference');
+    const viewportEl = $('viewport');
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty('--review-bar-height', bottomBar.getBoundingClientRect().height + 'px');
+      if (fitMode) applyFitScale();
+    }).observe(bottomBar);
     // ── Helpers ──────────────────────────────────
     function visible() {
       let filtered = mockups;
@@ -305,10 +350,18 @@
 ${contentHtml}
 <${scr}>(function(){
 if(window.lucide)try{lucide.createIcons()}catch(e){}
+// Close dialog forms locally; sandboxed previews cannot submit forms.
+document.addEventListener("click",function(e){if(e.defaultPrevented)return;var button=e.target.closest("button,input[type=submit]");if(!button||button.type!=="submit")return;var form=button.form,method=button.getAttribute("formmethod")||form?.getAttribute("method");if(!form||method?.toLowerCase()!=="dialog")return;var dialog=form.closest("dialog");if(!dialog)return;e.preventDefault();if(form.noValidate||button.formNoValidate||form.reportValidity())dialog.close(button.value)});
 var id=${JSON.stringify(mockupId)};
 function report(){parent.postMessage({type:"mockup-resize",id:id,height:document.documentElement.scrollHeight},"*")}
 new ResizeObserver(report).observe(document.documentElement);
 window.addEventListener("load",report);
+var point=false,scrollTimer;
+window.addEventListener("message",function(e){if(e.source!==parent)return;if(e.data?.type==="review-point-mode")point=e.data.enabled;if(e.data?.type==="review-scroll")window.scrollTo(e.data.x||0,e.data.y||0)});
+document.addEventListener("click",function(e){if(!point)return;e.preventDefault();e.stopImmediatePropagation();var el=e.target.closest("[data-region]")||e.target;parent.postMessage({type:"review-point",id:id,region:el.dataset.region||el.getAttribute("aria-label")||el.tagName.toLowerCase(),text:(el.innerText||el.textContent||"").trim().slice(0,120)},"*")},true);
+document.addEventListener("keydown",function(e){if(e.altKey&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){e.preventDefault();parent.postMessage({type:"review-key",id:id,key:e.key},"*")}});
+window.addEventListener("scroll",function(){clearTimeout(scrollTimer);scrollTimer=setTimeout(function(){parent.postMessage({type:"review-scroll",id:id,x:scrollX,y:scrollY},"*")},100)});
+
 var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
 })()</${scr}>
 </body></html>`;
@@ -321,15 +374,18 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       idx = Math.max(0, Math.min(idx, vi.length - 1));
       currentIndex = idx;
       carousel.style.transform = `translateX(-${vi[idx] * 100}vw)`;
+      closeComparison();
+      markSeen(currentMockup());
       updateUI();
+      refreshReferences();
     }
 
-    function navigate(dir) { goTo(currentIndex + dir); }
+    function navigate(dir) { if(recording)return; hasUserSelectedSession=true; goTo(currentIndex + dir); }
 
     function addSlide(mockup) {
       const slide = document.createElement('div');
       slide.className = 'slide';
-      slide.dataset.id = mockup.id;
+      slide.dataset.id = identity(mockup);
 
       const inner = document.createElement('div');
       inner.className = 'slide-inner';
@@ -346,8 +402,9 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       // No allow-same-origin: mockup scripts get an opaque origin and cannot reach
       // this page, its Soniox key, or the server's endpoints.
       iframe.setAttribute('sandbox', 'allow-scripts');
-      iframe.dataset.mockupId = mockup.id;
-      iframe.srcdoc = buildIframeSrc(mockup.contentHtml, mockup.id);
+      iframe.dataset.mockupId = identity(mockup);
+      iframe.onload = () => iframe.contentWindow?.postMessage({type:'review-point-mode',enabled:pointMode},'*');
+      iframe.srcdoc = buildIframeSrc(mockup.contentHtml, identity(mockup));
       content.appendChild(iframe);
 
       inner.appendChild(label);
@@ -372,11 +429,14 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         num.textContent = `#${m.number}`;
         const pos = document.createElement('span');
         pos.className = 'counter-pos';
-        pos.textContent = `${currentIndex + 1}/${vis.length}`;
+        pos.textContent = `r${m.revision} · ${currentIndex + 1}/${vis.length}`;
         counterEl.append(num, ` ${m.label} `, pos);
       }
 
+      updateReviewBrief();
       if (!m) return;
+      neutralBtn.className = 'vote-btn' + (m.vote === 'neutral' ? ' active-up' : '');
+      notesEl.disabled = btnUp.disabled = btnDown.disabled = neutralBtn.disabled = compareMode;
 
       // Vote buttons
       btnUp.className = 'vote-btn' + (m.vote === 'up' ? ' active-up' : '');
@@ -403,13 +463,16 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
     // ── Voting ───────────────────────────────────
     function vote(dir) {
       const m = currentMockup();
-      if (!m) return;
+      if (!m || compareMode || recording) return;
+      hasUserSelectedSession = true;
       m.vote = m.vote === dir ? null : dir;
+      queueDraft(m);
       updateUI();
     }
 
     btnUp.onclick = () => vote('up');
     btnDown.onclick = () => vote('down');
+    neutralBtn.onclick = () => vote('neutral');
 
     // ── Notes ────────────────────────────────────
     function autoResize() {
@@ -419,7 +482,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
 
     notesEl.addEventListener('input', () => {
       const m = currentMockup();
-      if (m) m.notes = notesEl.value;
+      if (m) {m.notes = notesEl.value;hasUserSelectedSession=true;queueDraft(m);}
       autoResize();
     });
     notesEl.addEventListener('focus', () => { notesActive = true; });
@@ -446,6 +509,8 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
           e.preventDefault();
           notesEl.blur();
           break;
+        case 'a': case 'A':
+          e.preventDefault(); toggleComparison(); break;
         case 'f': case 'F':
           if (!notesActive) { e.preventDefault(); toggleFit(); }
           break;
@@ -502,7 +567,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         // no need to reset transform (which caused a flash during carousel transitions)
         const naturalH = inner.offsetHeight;
         const naturalW = inner.offsetWidth;
-        const availH = window.innerHeight - 48 - 120;
+        const availH = carousel.clientHeight - 100;
         const availW = window.innerWidth - 64;
         const scaleH = naturalH > availH ? availH / naturalH : 1;
         const scaleW = naturalW > availW ? availW / naturalW : 1;
@@ -534,44 +599,35 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         sections.push(`# Feedback — ${ws.id} (${ws.projectName}, ${ws.branch})${sessionLabel}\n# Submitted: ${new Date().toISOString()}`);
       }
       for (const m of vis) {
-        const vote = m.vote === 'up' ? '👍' : m.vote === 'down' ? '👎' : '—';
+        const vote = m.vote === 'up' ? '👍' : m.vote === 'down' ? '👎' : m.vote === 'neutral' ? 'reviewed, no preference' : '—';
         const hasNotes = m.notes && m.notes.trim();
         if (!hasNotes && !m.vote) continue;
-        let section = `### #${m.number} ${m.label} (${m.id}.html)  [${vote}]`;
+        let section = `### #${m.number} ${m.label} (${m.id}, revision ${m.revision})  [${vote}]`;
         if (hasNotes) section += '\n' + m.notes.trim();
         sections.push(section);
       }
-      const untouched = vis.filter(m => !m.vote && !(m.notes && m.notes.trim()));
-      if (untouched.length) {
-        sections.push('### No feedback\n' + untouched.map(m => `- #${m.number} ${m.label} (${m.id}.html)`).join('\n'));
+      for (const [seen, label] of [[true, 'Viewed, no verdict'], [false, 'Not reviewed']]) {
+        const items = vis.filter(m => !!m.seen === seen && !m.vote && !m.notes.trim());
+        if(items.length) sections.push(`### ${label}\n` + items.map(m=>`- #${m.number} ${m.label} (${m.id}, revision ${m.revision})`).join('\n'));
       }
       return sections.join('\n\n').trim();
     }
 
     async function submitFeedback() {
-      const text = buildFeedbackText();
-      const wsId = currentWorkspace || (knownWorkspaces[0] && knownWorkspaces[0].id);
-
-      // Copy to clipboard
-      try { await navigator.clipboard.writeText(text); } catch {}
-
-      // POST to server (writes feedback-round-N.md)
-      if (wsId) {
-        try {
-          await fetch(`/workspace/${encodeURIComponent(wsId)}/feedback`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: text, session: currentSession }),
-          });
-        } catch (e) { console.warn('Failed to submit feedback:', e); }
-      }
-
-      submitBtn.textContent = 'Submitted ✓';
-      submitBtn.classList.add('done');
-      setTimeout(() => {
-        submitBtn.textContent = 'Submit';
-        submitBtn.classList.remove('done');
-      }, 2000);
+      if (recording) return;
+      const wsId = currentWorkspace;
+      if (!wsId) return;
+      submitBtn.disabled = true;
+      try {
+        await Promise.all(visible().map(saveDraft));
+        const text = buildFeedbackText();
+        const result = await api(`/workspace/${encodeURIComponent(wsId)}/feedback`, {content:text,session:currentSession});
+        try {await navigator.clipboard.writeText(text)} catch {}
+        submitBtn.textContent = 'Submitted ✓';
+        setStatus(`Round ${result.round} feedback saved.`, false);
+        setTimeout(()=>{submitBtn.textContent='Submit'},2000);
+      } catch(error) {setStatus(`Feedback was not submitted: ${error.message}. Your notes are retained; retry Submit.`,true)}
+      finally {submitBtn.disabled=false}
     }
 
     submitBtn.onclick = submitFeedback;
@@ -599,6 +655,8 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
     let audioReady = false;
     let transcript = { final: '', nonfinal: '' };
     let preRecordingNotes = '';
+    let recordingTarget = null;
+    let finalizingRecording = false;
     let keepaliveTimer;
     let barHeights = new Float32Array(24);
 
@@ -670,22 +728,32 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
     }
 
     function streamToTextarea() {
-      const m = currentMockup();
+      const m = recordingTarget;
       if (!m || !recording) return;
       const streamed = (transcript.final + transcript.nonfinal).trim();
       m.notes = preRecordingNotes + (preRecordingNotes && streamed ? '\n' : '') + streamed;
+      showRecordingNotes(m);
+      queueDraft(m);
+    }
+
+    function showRecordingNotes(m) {
+      const active = currentMockup();
+      if (!active || draftKey(active) !== draftKey(m)) return;
+      active.notes = m.notes;
       notesEl.value = m.notes;
       autoResize();
       notesEl.scrollTop = notesEl.scrollHeight;
     }
 
     function startRecording() {
+      if (compareMode || finalizingRecording || !currentMockup()) return;
       if (!audioReady) { flash('Mic not available — allow mic access and reload'); return; }
       if (!sonioxWs || sonioxWs.readyState !== WebSocket.OPEN) { flash('Voice connecting…'); return; }
       recording = true;
       transcript = { final: '', nonfinal: '' };
       barHeights.fill(0);
       const m = currentMockup();
+      recordingTarget = {...m};
       preRecordingNotes = m ? (m.notes || '').trimEnd() : '';
 
       micBtn.classList.add('recording');
@@ -716,7 +784,11 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
     }
 
     function stopRecording() {
+      if (!recording) return;
       recording = false;
+      finalizingRecording = true;
+      const target = recordingTarget;
+      const previousNotes = preRecordingNotes;
       micBtn.classList.remove('recording');
       waveform.classList.remove('active');
       notesEl.classList.remove('streaming');
@@ -731,12 +803,14 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       // Wait for final tokens, then commit
       setTimeout(() => {
         const text = (transcript.final + transcript.nonfinal).trim();
-        const m = currentMockup();
+        const m = target;
         if (m) {
-          m.notes = preRecordingNotes + (preRecordingNotes && text ? '\n' : '') + text;
-          notesEl.value = m.notes;
-          autoResize();
+          m.notes = previousNotes + (previousNotes && text ? '\n' : '') + text;
+          showRecordingNotes(m);
+          queueDraft(m);
         }
+        recordingTarget = null;
+        finalizingRecording = false;
       }, 600);
     }
 
@@ -792,21 +866,16 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       es.addEventListener('add', (e) => {
         const data = JSON.parse(e.data);
         addMockup(data);
-        // Auto-focus: switch to workspace/session with most recent file addition
-        if (initialized && data.workspace && data.workspace !== currentWorkspace) {
-          currentWorkspace = data.workspace;
-          hasUserSelectedSession = false;
-          currentIndex = 0;
-          goTo(0);
+        if (initialized && data.workspace !== currentWorkspace) {
+          pendingWorkspaces.add(data.workspace);
           updateWorkspaceTabs();
-          updateSessionPills();
         }
       });
       es.addEventListener('update', (e) => updateMockupContent(JSON.parse(e.data)));
-      es.addEventListener('remove', (e) => removeMockup(JSON.parse(e.data).id));
+      es.addEventListener('remove', (e) => removeMockup(JSON.parse(e.data)));
       es.addEventListener('workspaces', (e) => {
         knownWorkspaces = JSON.parse(e.data);
-        if (knownWorkspaces.length > 0 && currentWorkspace === null) {
+        if (knownWorkspaces.length > 0 && !knownWorkspaces.some(w=>w.id===currentWorkspace)) {
           currentWorkspace = knownWorkspaces[0].id;
         }
         updateWorkspaceTabs();
@@ -830,18 +899,21 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         }
         updateWorkspaceTabs();
       });
-      es.addEventListener('init-complete', () => { initialized = true; });
-      es.addEventListener('session-closed', () => { hasUserSelectedSession = false; });
+      es.addEventListener('init-complete', () => { initialized = true;markSeen(currentMockup());refreshReferences(); });
+      es.addEventListener('brief',e=>{const data=JSON.parse(e.data);briefs.set(data.workspace,data.brief);if(data.drafts){for(const review of Object.values(data.drafts)){drafts.set(`${data.workspace}:${review.id}:r${review.revision}`,review)}}for(const m of mockups.filter(m=>m.workspace===data.workspace))restoreDraft(m);updateReviewBrief();updateUI();});
+      es.addEventListener('draft',e=>{const data=JSON.parse(e.data);const key=`${data.workspace}:${data.review.id}:r${data.review.revision}`;drafts.set(key,data.review);const m=mockups.find(m=>draftKey(m)===key);if(m&&!m.pendingSave){restoreDraft(m);updateUI()}});
+      es.addEventListener('workspace-error',e=>{const data=JSON.parse(e.data);if(data.workspace===currentWorkspace)setStatus(data.error,true)});
+      es.addEventListener('session-closed', () => {});
       es.addEventListener('session', (e) => {
         const data = JSON.parse(e.data);
         const key = `${data.workspace}:${data.id}`;
         // A new round takes focus once its mockups arrive.
-        if (initialized && !sessionLabels.has(key)) hasUserSelectedSession = false;
+        if (initialized && !sessionLabels.has(key) && hasUserSelectedSession && data.workspace===currentWorkspace) setStatus(`New round ${data.id} is available in the round tabs.`);
         sessionLabels.set(key, data.label || '');
         // Update mockup session assignments
         if (data.mockups) {
           for (const mockupId of data.mockups) {
-            const m = mockups.find(mk => mk.id === mockupId);
+            const m = mockups.find(mk => mk.id === mockupId && mk.workspace === data.workspace);
             if (m) m.session = data.id;
           }
         }
@@ -874,13 +946,17 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         const dot = document.createElement('span');
         dot.className = 'ws-dot';
         tab.appendChild(dot);
+        if(pendingWorkspaces.has(ws.id)){const badge=document.createElement('span');badge.className='ws-badge';badge.textContent='New';tab.appendChild(badge)}
 
         tab.appendChild(document.createTextNode(ws.id));
         tab.title = `${ws.projectName} (${ws.branch}) — ${ws.mockupDir}`;
 
         tab.onclick = () => {
           if (currentWorkspace === ws.id) return;
+          if(recording)return;
           currentWorkspace = ws.id;
+          pendingWorkspaces.delete(ws.id);
+          hasUserSelectedSession=false;
           currentSession = null;
           currentIndex = 0;
           goTo(0);
@@ -919,7 +995,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
     }
 
     function addMockup(data) {
-      if (mockups.find(m => m.id === data.id)) {
+      if (mockups.find(m => m.id === data.id && m.workspace === data.workspace)) {
         updateMockupContent(data);
         return;
       }
@@ -931,11 +1007,14 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         contentHtml: parsed.contentHtml,
         session: data.session || 0,
         number: data.number || 0,
+        revision: data.revision || 1,
+        seen: false,
         workspace: data.workspace || null,
         vote: null,
         notes: '',
       };
 
+      restoreDraft(mockup);
       mockups.push(mockup);
       addSlide(mockup);
 
@@ -945,9 +1024,12 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
     }
 
     function updateMockupContent(data) {
-      const idx = mockups.findIndex(m => m.id === data.id);
+      const idx = mockups.findIndex(m => m.id === data.id && m.workspace === data.workspace);
       if (idx < 0) return;
       const parsed = parseMockupHtml(data.html);
+      const changed = data.revision !== mockups[idx].revision;
+      const activeChanged=changed&&currentMockup()===mockups[idx];
+      if(changed){mockups[idx].revision=data.revision;mockups[idx].vote=null;mockups[idx].notes='';mockups[idx].seen=false;mockups[idx].pendingSave=false;mockups[idx].clientUpdated=undefined;restoreDraft(mockups[idx]);if(activeChanged)closeComparison();}
       mockups[idx].contentHtml = parsed.contentHtml;
       mockups[idx].label = parsed.label || mockups[idx].label;
       if (data.session) mockups[idx].session = data.session;
@@ -956,15 +1038,17 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       if (slides[idx]) {
         const iframe = slides[idx].querySelector('iframe');
         const label = slides[idx].querySelector('.slide-label');
-        if (iframe) iframe.srcdoc = buildIframeSrc(parsed.contentHtml, data.id);
+        if (iframe) iframe.srcdoc = buildIframeSrc(parsed.contentHtml, identity(mockups[idx]));
         if (label) label.textContent = `#${mockups[idx].number} · ${mockups[idx].label}`;
       }
       updateUI();
       if (data.session) updateSessionPills();
+      if(activeChanged){markSeen(currentMockup());refreshReferences()}
     }
 
-    function removeMockup(id) {
-      const idx = mockups.findIndex(m => m.id === id);
+    function removeMockup(data) {
+      const id=data.id;
+      const idx = mockups.findIndex(m => m.id === id && m.workspace === data.workspace);
       if (idx < 0) return;
       mockups.splice(idx, 1);
       const slides = carousel.querySelectorAll('.slide');
@@ -1030,17 +1114,282 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       }
     }
 
-    // ── Iframe height sync ──────────────────────────
-    window.addEventListener('message', (e) => {
-      if (e.data?.type === 'mockup-resize') {
-        const id = CSS.escape(String(e.data.id));
-        const iframe = carousel.querySelector(`iframe[data-mockup-id="${id}"]`);
-        if (iframe && iframe.contentWindow === e.source) {
-          iframe.style.height = e.data.height + 'px';
-          if (fitMode) applyFitScale();
-        }
+    window.addEventListener('message', e => {
+      const frame=[...document.querySelectorAll('iframe[data-mockup-id]')].find(f=>f.contentWindow===e.source && f.dataset.mockupId===e.data?.id);
+      if(!frame)return;
+      const m=currentMockup();
+      if(e.data.type==='mockup-resize') {
+        const owner=mockups.find(mockup=>identity(mockup)===frame.closest('.slide')?.dataset.id);
+        frame.dataset.naturalHeight=String(Math.max(100,Math.min(50000,e.data.height)));
+        if(!briefs.get(owner?.workspace)?.viewport?.height)frame.style.height=frame.dataset.naturalHeight+'px';
+        if(fitMode)applyFitScale();
+      } else if(m && e.data.type==='review-key' && !recording) {
+        if(e.data.key==='ArrowLeft')navigate(-1);
+        if(e.data.key==='ArrowRight')navigate(1);
+        if(e.data.key==='ArrowUp')vote('up');
+        if(e.data.key==='ArrowDown')vote('down');
+      } else if(m && e.data.type==='review-scroll' && frame.dataset.mockupId===identity(m)) {
+        m.scroll={x:e.data.x,y:e.data.y};
+      } else if(m && e.data.type==='review-point' && pointMode && !compareMode) {
+        const anchor=`[${String(e.data.region).slice(0,80)}: ${String(e.data.text).slice(0,120)}] `;
+        m.notes=(m.notes?m.notes+'\n':'')+anchor;
+        notesEl.value=m.notes;notesEl.focus();queueDraft(m);autoResize();
+        pointMode=false;setPointMode();
       }
     });
+
+    async function api(endpoint, body) {
+      const response=await fetch(endpoint,{...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),signal:AbortSignal.timeout(5000)});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error||`HTTP ${response.status}`);
+      return result;
+    }
+    function setStatus(text, error = false) {
+      statusEl.textContent = text;
+      statusEl.classList.toggle("error", error);
+    }
+    function restoreDraft(m) {
+      let local;
+      try {
+        local = JSON.parse(localStorage.getItem("de-review:" + draftKey(m)));
+      } catch {}
+      const saved = drafts.get(draftKey(m));
+      const review = local && (!saved || local.clientUpdated > saved.clientUpdated) ? local : saved;
+      if (review) {
+        m.notes = review.notes || "";
+        m.vote = review.vote || null;
+        m.seen = review.seen === true;
+      }
+    }
+    function markSeen(m) {
+      if (m && initialized && !m.seen) {
+        m.seen = true;
+        queueDraft(m);
+      }
+    }
+    function queueDraft(m) {
+      m.clientUpdated = Date.now();
+      m.pendingSave = true;
+      const active = currentMockup();
+      if (active && active !== m && draftKey(active) === draftKey(m)) {
+        active.clientUpdated = m.clientUpdated;
+        active.pendingSave = true;
+      }
+      const review = {
+        id: m.id,
+        revision: m.revision,
+        notes: m.notes,
+        vote: m.vote,
+        seen: m.seen,
+        clientUpdated: m.clientUpdated,
+      };
+      try {
+        localStorage.setItem("de-review:" + draftKey(m), JSON.stringify(review));
+      } catch {}
+      const key = draftKey(m);
+      clearTimeout(saveTimers.get(key));
+      const queued = { ...m };
+      saveTimers.set(
+        key,
+        setTimeout(
+          () =>
+            saveDraft(queued).catch((error) =>
+              setStatus(`Autosave failed: ${error.message}; notes retained in this browser.`, true),
+            ),
+          250,
+        ),
+      );
+    }
+    async function saveDraft(m) {
+      clearTimeout(saveTimers.get(draftKey(m)));
+      const review = {
+        id: m.id,
+        revision: m.revision,
+        notes: m.notes,
+        vote: m.vote,
+        seen: m.seen,
+        clientUpdated: m.clientUpdated || Date.now(),
+      };
+      const saved = await api(`/workspace/${encodeURIComponent(m.workspace)}/draft`, review);
+      drafts.set(draftKey(m), saved);
+      if (review.clientUpdated === m.clientUpdated) m.pendingSave = false;
+      const active = currentMockup();
+      if (active && draftKey(active) === draftKey(m) && review.clientUpdated === active.clientUpdated)
+        active.pendingSave = false;
+    }
+    function updateReviewBrief() {
+      const brief = briefs.get(currentWorkspace) || {};
+      $("review-question").textContent = [
+        brief.question,
+        brief.state ? `Initial state: ${brief.state}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const requestedWidth =
+        viewportEl.value === "auto" ? null : Number(viewportEl.value) || brief.viewport?.width;
+      const width =
+        requestedWidth ||
+        (sideMode ? activeSlide()?.querySelector("iframe")?.getBoundingClientRect().width : null);
+      for (const slide of carousel.children) {
+        const owner = mockups.find(mockup => identity(mockup) === slide.dataset.id);
+        const height = briefs.get(owner?.workspace)?.viewport?.height;
+        const inner = slide.querySelector(".slide-inner");
+        const frames = [...slide.querySelectorAll("iframe")];
+        inner.style.width = width
+          ? `${sideMode && slide === activeSlide() ? width * 2 + 16 : width}px`
+          : "";
+        inner.style.maxWidth = width ? "none" : "";
+        for (const frame of frames) {
+          frame.style.width = width ? `${width}px` : "100%";
+          frame.style.height = height ? height + "px" : frame.dataset.naturalHeight ? frame.dataset.naturalHeight + "px" : "";
+          frame.style.minHeight = height ? "0" : "";
+        }
+      }
+    }
+    function activeSlide() {
+      const m = currentMockup();
+      return m && [...carousel.children].find((slide) => slide.dataset.id === identity(m));
+    }
+    function closeComparison() {
+      compareMode = false;
+      sideMode = false;
+      comparison = null;
+      for (const content of carousel.querySelectorAll(".slide-content")) {
+        content.classList.remove("side-by-side");
+        content.querySelector(".comparison-frame")?.remove();
+        const frame = content.querySelector("iframe");
+        if (frame) frame.style.display = "block";
+      }
+      $("compare-btn").setAttribute("aria-pressed", "false");
+      $("side-btn").setAttribute("aria-pressed", "false");
+    }
+    async function refreshReferences() {
+      const m = currentMockup();
+      if (!m) return;
+      const generation = ++comparisonGeneration;
+      try {
+        const [{ revisions }, { archived }] = await Promise.all([
+          api(
+            `/workspace/${encodeURIComponent(m.workspace)}/revisions?mockup=${encodeURIComponent(m.id)}`,
+          ),
+          api(`/workspace/${encodeURIComponent(m.workspace)}/archive`),
+        ]);
+        if (generation !== comparisonGeneration || currentMockup() !== m) return;
+        referenceEl.replaceChildren(new Option("Choose…", ""));
+        if (pinned) referenceEl.add(new Option(`Pinned #${pinned.number} r${pinned.revision}`, "pin"));
+        for (const revision of revisions.filter((r) => r.revision !== m.revision).reverse())
+          referenceEl.add(
+            new Option(
+              `#${m.number} r${revision.revision} · round ${revision.round}`,
+              String(revision.revision),
+            ),
+          );
+        for (const entry of archived)
+          referenceEl.add(
+            new Option(
+              `Archived #${entry.number} ${entry.label} r${entry.revision}`,
+              `archived:${entry.id}:${entry.revision}`,
+            ),
+          );
+        $("compare-btn").disabled = $("side-btn").disabled = true;
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+    async function loadReference() {
+      const m = currentMockup();
+      const value = referenceEl.value;
+      closeComparison();
+      if (!m || !value) return;
+      const generation = ++comparisonGeneration;
+      try {
+        let target;
+        if (value === "pin") target = pinned;
+        else {
+          const [, archivedId, archivedRevision] = value.split(":");
+          const id = archivedId || m.id;
+          const revision = archivedRevision || value;
+          const r = await api(
+            `/workspace/${encodeURIComponent(m.workspace)}/revision?mockup=${encodeURIComponent(id)}&revision=${revision}`,
+          );
+          const parsed = parseMockupHtml(r.html);
+          target = { ...m, ...r, id, label: parsed.label, contentHtml: parsed.contentHtml };
+          if (archivedId) {
+            const { archived } = await api(`/workspace/${encodeURIComponent(m.workspace)}/archive`);
+            target.number = archived.find((entry) => entry.id === archivedId)?.number;
+          }
+        }
+        if (generation !== comparisonGeneration || currentMockup() !== m) return;
+        comparison = target;
+        const frame = document.createElement("iframe");
+        frame.className = "comparison-frame";
+        frame.setAttribute("sandbox", "allow-scripts");
+        frame.dataset.mockupId = identity(target) + ":reference";
+        frame.srcdoc = buildIframeSrc(target.contentHtml, frame.dataset.mockupId);
+        frame.style.display = "none";
+        activeSlide().querySelector(".slide-content").appendChild(frame);
+        $("compare-btn").disabled = $("side-btn").disabled = false;
+        updateReviewBrief();
+        setStatus(
+          `Reference: #${target.number} r${target.revision}. A/B keeps the same viewport width.`,
+        );
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+    function toggleComparison(side = false) {
+      if (!comparison || recording) return;
+      if (side) {
+        sideMode = !sideMode;
+        compareMode = false;
+      } else {
+        compareMode = !compareMode;
+        sideMode = false;
+      }
+      const content = activeSlide()?.querySelector(".slide-content");
+      if (!content) return;
+      const frame = content.querySelector("iframe"),
+        other = content.querySelector(".comparison-frame");
+      frame.style.display = compareMode ? "none" : "block";
+      other.style.display = compareMode || sideMode ? "block" : "none";
+      content.classList.toggle("side-by-side", sideMode);
+      other.contentWindow?.postMessage(
+        { type: "review-scroll", ...(currentMockup().scroll || {}) },
+        "*",
+      );
+      $("compare-btn").setAttribute("aria-pressed", String(compareMode));
+      $("side-btn").setAttribute("aria-pressed", String(sideMode));
+      setStatus(
+        compareMode
+          ? `Viewing reference #${comparison.number} r${comparison.revision}; press A to return and review the current design.`
+          : "Viewing current design.",
+      );
+      updateUI();
+    }
+    function setPointMode() {
+      $("point-btn").setAttribute("aria-pressed", String(pointMode));
+      for (const frame of document.querySelectorAll("iframe[data-mockup-id]"))
+        frame.contentWindow?.postMessage({ type: "review-point-mode", enabled: pointMode }, "*");
+      if (pointMode) setStatus("Click an element in the preview to anchor your note.");
+    }
+    $("pin-btn").onclick = () => {
+      const m = currentMockup();
+      if (!m) return;
+      pinned = { ...m };
+      setStatus(`Pinned #${m.number} r${m.revision}. Choose another design to compare.`);
+      refreshReferences();
+    };
+    referenceEl.onchange = loadReference;
+    $("compare-btn").onclick = () => toggleComparison();
+    $("side-btn").onclick = () => toggleComparison(true);
+    $("point-btn").onclick = () => {
+      pointMode = !pointMode;
+      setPointMode();
+    };
+    viewportEl.onchange = () => {
+      updateReviewBrief();
+      if (fitMode) applyFitScale();
+    };
 
     // ── Init ─────────────────────────────────────
     (async () => {

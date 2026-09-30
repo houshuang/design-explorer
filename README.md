@@ -1,158 +1,93 @@
 # Design Explorer
 
-A [Claude Code skill](https://code.claude.com/docs/en/skills) for iterative design exploration. Generate diverse HTML mockups, review them in a full-screen carousel, and give structured feedback with keyboard shortcuts.
+A Claude Code and Codex skill for generating useful UI design variations, reviewing them in a local browser, and iterating from feedback. Models write the design differences; the reviewer supplies resources, comparison and persistence. Raw HTML remains available for bespoke layouts.
 
-## How it works
+## Start an exploration
 
-1. You describe what you want designed (a landing page, a dashboard, a component)
-2. Claude registers a workspace with the global singleton server (starts it if needed)
-3. Claude writes down fixed constraints and variation axes, then generates 5 mockups (3–4 when converging) as separate files
-4. A local server serves them in a full-screen carousel with live updates
-5. You review with keyboard shortcuts: arrow keys to navigate, ↑/↓ to vote, notes, optional voice
-6. Press `C` to submit feedback — it's written to `feedback-round-N.md` and Claude, waiting on that file, picks it up automatically
-7. Claude iterates — editing liked mockups, removing disliked ones, adding new variants
-8. Repeat until you're happy
-
-**Global singleton**: One server on `127.0.0.1:10000` serves all projects. Each exploration uses its own mockup directory (`/tmp/claude/design-explorer/mockups/<repo>-<topic>-<time>`) and gets its own tab in the browser UI, so two sessions in the same repo never clobber each other.
-
-**Numbers**: every mockup has a number that never changes within its directory (`#7`), shown in the counter, on the slide and in the feedback file. Revisions keep their number; deleted numbers are not reused. Claude posts the `bin/lineup` list in chat, so "number 7" always means one design.
-
-**Rounds**: Claude runs `bin/round` before each batch, so every mockup it creates or revises afterwards lands in that round, and the newest round is selected automatically. Pressing `C` also closes the open round. Round pills carry the round number and a short label, e.g. `Round 3 · two-column`.
-
-**Auto-focus**: The browser automatically switches to the workspace and session with the most recent file additions.
-
-**Feedback file**: When you submit feedback, it's written to `{mockupDir}/feedback-round-N.md` (one file per round, each heading naming the mockup file) AND copied to clipboard. Claude waits for the file — no need to paste.
-
-## Install
+Invoke `/design-explorer` with the screen or decision to explore. The model reads the product identity and real content, states the decision and initial state, and chooses an appropriate number of directions. A broad exploration usually needs 4–5; a narrow decision needs 2–3; specific feedback may need one revision.
 
 ```bash
-# Clone into your Claude Code skills directory
-git clone https://github.com/houshuang/design-explorer.git ~/.claude/skills/design-explorer
+~/.claude/skills/design-explorer/bin/begin --project /path/to/project --topic report-placement --label "Entry points" --question "Where should reporting live?" --state "Dialog closed"
 ```
 
-That's it. The skill is now available as `/design-explorer` in Claude Code. A running session picks it up without a restart (unless `~/.claude/skills` itself is new, in which case restart once); run `/skills` to check that it is listed.
+The helper creates a private directory inside `/tmp/claude/design-explorer`, registers it, starts a round and prints the directory, review URL and feedback file. Each exploration has its own workspace. One loopback server on port 10000 serves them all.
 
-Keep it in `~/.claude/skills/design-explorer`: the skill's instructions call its helper scripts at that path.
+## Author only what varies
 
-### Requirements
+Choose freely between full `mockup-*.html` fragments and `mockup-*.json` variants. Reuse approved styles, fixture data, local images or a shared page once. JSON variants can replace named page slots, override CSS, or supply independent HTML. No component library or layout vocabulary is required.
 
-- Node.js (for the local preview server — zero npm dependencies)
-- A modern browser
+See [the fragment reference](references/fragments.md) for the exact formats and examples. `exploration.json` holds the question, initial state, viewport, approved constraints, exclusions and optional shared files. Changes to shared files recompose dependent designs. Keep meaningful typography, spacing, representative content and working controls; inspect desktop and mobile renderings before presenting a round.
 
-## Usage
+The paired real-model evaluation saved about 49–56% of output tokens for two narrow decisions. Broad layouts needed substantially more bespoke output; after equal repair passes they cost about 5% more output than the original workflow. Blind screenshot review preferred the revised narrow designs and, after repairs, modestly preferred the revised broad set. This small sample is evidence of useful reuse, not a universal quality or speed guarantee. See [evaluation methodology and results](eval/README.md).
 
-In Claude Code:
+## Review and iterate
 
+Each design has a permanent number; edits keep the number and save an immutable revision. Notes and votes belong to the revision reviewed. The reviewer can:
+
+- Navigate, like/reject, mark neutral, and add text or optional voice notes.
+- Point at an element to anchor a note.
+- Select the product width, window width, or 390/768/1280px.
+- Pin a design, select a previous revision or archived design, and compare with A/B or side by side at equal widths.
+- Reload without losing autosaved drafts. Drafts also have a browser fallback if saving fails.
+- Submit feedback with `C` or the button. Success appears only after the server saves it; errors retain the notes for retry.
+
+New activity in another workspace shows a badge without taking focus. Not reviewed, viewed without a verdict, and neutral are distinct states. Voice notes stay attached to the design and revision where recording began.
+
+```bash
+# Resume: register, then read the compact brief and numbered lineup.
+~/.claude/skills/design-explorer/bin/register --project /path/to/project --dir /tmp/claude/design-explorer/mockups/example
+~/.claude/skills/design-explorer/bin/context --dir /tmp/claude/design-explorer/mockups/example
+
+# Start a round before adding or editing variants.
+~/.claude/skills/design-explorer/bin/round --dir /tmp/claude/design-explorer/mockups/example --label "Refinements"
+~/.claude/skills/design-explorer/bin/lineup --dir /tmp/claude/design-explorer/mockups/example
+
+# Wait at most 60 seconds; a submission hash can exclude an older result.
+~/.claude/skills/design-explorer/bin/feedback --dir /tmp/claude/design-explorer/mockups/example --round 2 --wait-seconds 60
+# Add --after HASH to wait for a later submission.
 ```
-/design-explorer a landing page for my SaaS product
-/design-explorer redesign the settings page with better UX
-/design-explorer explore dashboard layouts for analytics data
-```
 
-Or just describe what you want and mention "design" or "mockup" — Claude will use the skill.
+Submitted feedback is written to `feedback-round-N.md`, with numbers, revision references and a lineup. Chat feedback can also end a round. Preserve explicit decisions in the brief and move rejected sources into `archived/`; snapshot history remains available. Never write reviewer feedback on the reviewer's behalf.
 
 ## Keyboard shortcuts
 
 | Key | Action |
-|-----|--------|
-| `←` `→` | Navigate between mockups |
-| `↑` | Like (toggle) |
-| `↓` | Dislike (toggle) |
-| `Tab` | Focus notes textarea |
-| `Esc` | Blur notes |
-| `F` | Toggle fit-to-window |
-| `C` | Submit feedback (writes to file + clipboard) |
-| `?` | Show/hide shortcut help |
-| Hold `Space` | Voice note (requires Soniox) |
+| --- | --- |
+| Left / right | Navigate |
+| Up / down | Like / reject |
+| Tab / Esc | Focus / blur notes |
+| F | Fit to window |
+| A | Switch current/reference |
+| Alt + arrows | Navigate/vote from inside a preview |
+| C | Submit feedback |
+| Hold Space | Dictate, when voice is enabled |
+| ? | Shortcut help |
 
-## Voice notes (optional)
-
-Voice-to-text via [Soniox](https://soniox.com/) streaming transcription. Words appear in real-time as you speak. This is entirely optional — the skill works fine without it.
-
-To enable, add your key to a `.env` file in the skill directory:
+## Install
 
 ```bash
-echo "SONIOX_KEY=your_key_here" >> ~/.claude/skills/design-explorer/.env
+git clone https://github.com/houshuang/design-explorer.git ~/.claude/skills/design-explorer
+# Optional: expose the same installation to Codex.
+ln -s ~/.claude/skills/design-explorer ~/.agents/skills/design-explorer
 ```
 
-This is the recommended approach — configure once, works automatically in every project.
+Node.js 18+ and a modern browser are required. The server has no npm dependencies or build step. Keep the installation at this path because the skill calls its helpers there. For voice, set `SONIOX_KEY` (or legacy `SONIX_KEY`) in the server environment or the installation's `.env`; otherwise voice is disabled.
 
-The server checks for the key in this order:
-1. `SONIOX_KEY` or `SONIX_KEY` environment variable
-2. `~/.claude/skills/design-explorer/.env`
+## Runtime and verification
 
-If no key is found, voice is silently disabled and the mic button is hidden. Everything else works normally.
+`assets/server.js` watches workspaces and handles rounds, feedback and revisions. `assets/workspace.js` composes files, embeds local image bytes, snapshots revisions and saves drafts. `assets/harness-template.html` renders isolated previews with Tailwind, Google Fonts and Lucide. Raw fragments and the legacy mockup-content wrapper remain supported.
 
-## Architecture
+The server binds only to 127.0.0.1, rejects foreign hosts/origins and non-JSON POSTs, and confines workspace/shared paths after symlink resolution. Previews use `sandbox="allow-scripts"` without same-origin access. They cannot read the parent's voice key or persistence. Shared inputs are trusted design code, not a sanitised template language.
 
-```
-~/.claude/skills/design-explorer/
-├── SKILL.md                    # Claude Code skill definition (workflow for Claude)
-├── README.md                   # This file
-├── CHANGELOG.md                # Version history
-├── test/
-│   └── server.test.js          # node --test test/server.test.js
-├── bin/
-│   ├── register                # Register workspace (starts or restarts server if needed)
-│   ├── status                  # Show server status and workspaces
-│   └── stop                    # Stop the server
-└── assets/
-    ├── server.js               # Node server (zero deps)
-    └── harness-template.html   # Full-screen carousel UI with workspace tabs
-```
-
-**Global singleton server**: One server on port 10000 serves all projects. Each Claude session registers a workspace (its mockup directory, plus project path and branch for display). The browser shows a tab bar for switching between workspaces. Registrations are kept in `~/.claude/design-explorer-workspaces.json` so they survive restarts.
-
-**Fragment architecture**: Each mockup is a standalone HTML file with a descriptive slug name (`mockup-warm-editorial.html`, `mockup-dense-dashboard.html`). Each renders inside an **isolated iframe** with pre-loaded resources (Tailwind CSS, 11 Google Fonts, Lucide icons). Claude writes small focused fragments, not monolithic pages. Old mockups are cleaned up by default before each new session.
-
-**Iframe isolation**: Each mockup iframe is `sandbox="allow-scripts"` without `allow-same-origin`, so mockup code runs with an opaque origin: it cannot touch the carousel, read the Soniox key or call the server. A broken mockup cannot crash the page.
-
-**Pre-loaded harness**: Every iframe includes Tailwind CSS (full JIT), 11 Google Fonts (Inter, DM Sans, Space Grotesk, Syne, Cormorant Garamond, EB Garamond, Crimson Pro, Playfair Display, Instrument Serif, JetBrains Mono, Space Mono), and Lucide icons — so mockups stay compact and token-efficient.
-
-**Rounds**: New and edited mockup files go into the open round. `POST /round` (via `bin/round`) closes it and opens the next; submitting feedback (`C`) on the open round closes it too. An empty open round is never closed, so the call is idempotent and numbers have no gaps. Feedback is written to `{mockupDir}/feedback-round-N.md`. Explicit start-of-round signalling replaced the C-only boundary because feedback given in chat never closed a round. The UI auto-focuses on the workspace and round with the most recent activity.
-
-**Security**: The server binds to `127.0.0.1` only and sends no CORS headers. It refuses requests whose `Host` is not `localhost`/`127.0.0.1` on its port (DNS rebinding) and requests from any other origin (CSRF); POSTs must be `application/json`. Workspaces can only point at existing directories inside `/tmp/claude/design-explorer` (checked after resolving symlinks). The Soniox key is only embedded in the page served to same-origin loopback requests.
-
-**Lifecycle**: `register` launches the server in its own session with stdin closed and output appended to `~/.claude/design-explorer.log`, so stopping the Claude task that ran it does not kill it. `/health` reports a SHA-256 of `server.js` + `harness-template.html`; `register` restarts the server when that differs from the installed files, and fails with the log path if the port is held by something else. PID in `~/.claude/design-explorer.pid`. Idle shutdown after 30 min with no registered workspaces.
-
-**No build step, no npm install, no dependencies.**
-
-## CLI Tools
+Registration checks a hash of all three runtime files and restarts stale code while preserving registrations. Default registry, PID and logs live under `~/.claude`; `--state-dir` on begin/register/server isolates test state, and `--port` selects a private test port. `bin/status` and `bin/stop` operate on the default singleton.
 
 ```bash
-# Register a workspace (starts server if not running, opens browser on first registration)
-~/.claude/skills/design-explorer/bin/register --project /path --dir /path/mockups [--branch main]
-
-# Check server status and list workspaces
-~/.claude/skills/design-explorer/bin/round --dir /path/mockups [--label TEXT]
-~/.claude/skills/design-explorer/bin/lineup --dir /path/mockups
-~/.claude/skills/design-explorer/bin/status
-
-# Stop the server
-~/.claude/skills/design-explorer/bin/stop
+node --test test/server.test.js test/workspace.test.js
+# Browser tests require an existing Playwright installation and Chromium.
+DE_PLAYWRIGHT=/absolute/path/to/playwright node --test test/browser.test.js
 ```
 
-The `register` script is the primary entry point. It:
-1. Checks if the server is running and its code hash matches the installed files
-2. Starts it (detached) if not running, restarts it if stale, or fails loudly if another process holds the port
-3. Registers the workspace via `POST /workspace/register`
-4. Outputs the workspace ID to stdout
-
-### Legacy mode
-
-The server still accepts `--dir <path>` for backwards compatibility, which auto-registers a single workspace (the directory must be inside `/tmp/claude/design-explorer`):
-
-```bash
-node ~/.claude/skills/design-explorer/assets/server.js --dir /tmp/claude/design-explorer/mockups/demo
-```
-
-## Tests
-
-```bash
-node --test test/server.test.js
-```
-
-The tests start a private server through `bin/register` on port 10077 (and 10078) with a temporary `HOME`, and stop it afterwards.
+Tests use private servers and temporary directories. The browser suite covers workspace collisions, revision drafts, archived comparisons, point notes, equal widths, submission retry and delayed voice finalisation. Paid/subscription-backed model evaluations are separate and opt-in; see `eval/README.md`.
 
 ## License
 

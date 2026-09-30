@@ -1,0 +1,18 @@
+{
+  "question": "Which grouping makes Holbergs textbook appearances clearest while keeping curricula primary?",
+  "state": "Representative textbook entries visible, with working native expansion where useful",
+  "approved": [
+    "Use the approved SKARD paper, Newsreader serif, DM Mono and rust identity",
+    "Keep the header and curriculum section fixed and prominent",
+    "Show all seven supplied appearances accurately; label them as an excerpt"
+  ],
+  "base": "shared/page.html",
+  "styles": [
+    "shared/style.css"
+  ],
+  "data": "shared/data.json",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  }
+}

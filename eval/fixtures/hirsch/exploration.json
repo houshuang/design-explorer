@@ -1,0 +1,12 @@
+{
+  "question": "Which overall presentation makes the claim, reasoning and uncertainty easiest to understand?",
+  "state": "Claim and verdict visible; all eight reasoning nodes reachable",
+  "approved": [
+    "Use the provided research fixture without changing its conclusions"
+  ],
+  "data": "shared/data.json",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  }
+}

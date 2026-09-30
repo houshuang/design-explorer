@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { exec } = require('child_process');
+const workspace = require('./workspace');
 
 // ── Config ──────────────────────────────────────
 const args = process.argv.slice(2);
@@ -19,8 +20,10 @@ const PORT = parseInt(getArg('port', '10000'), 10);
 const HOST = '127.0.0.1';
 const NO_OPEN = args.includes('--no-open');
 const HARNESS = path.join(__dirname, 'harness-template.html');
-const PID_FILE = path.join(process.env.HOME, '.claude', 'design-explorer.pid');
-const STATE_FILE = path.join(process.env.HOME, '.claude', 'design-explorer-workspaces.json');
+const STATE_DIR = getArg('state-dir', path.join(process.env.HOME, '.claude'));
+fs.mkdirSync(STATE_DIR, { recursive: true });
+const PID_FILE = path.join(STATE_DIR, 'design-explorer.pid');
+const STATE_FILE = path.join(STATE_DIR, 'design-explorer-workspaces.json');
 // Mockup directories must live under this root; anything else is refused at registration.
 const MOCKUP_ROOT = '/tmp/claude/design-explorer';
 const MAX_BODY = 1024 * 1024;
@@ -31,7 +34,7 @@ const ALLOWED_ORIGINS = new Set([...ALLOWED_HOSTS].map(h => `http://${h}`));
 // bin/register compares this with the installed files and restarts a stale server.
 const SERVER_SRC = fs.readFileSync(__filename);
 const TEMPLATE_SRC = fs.readFileSync(HARNESS);
-const CODE_HASH = crypto.createHash('sha256').update(SERVER_SRC).update(TEMPLATE_SRC).digest('hex');
+const CODE_HASH = crypto.createHash('sha256').update(SERVER_SRC).update(TEMPLATE_SRC).update(fs.readFileSync(path.join(__dirname, 'workspace.js'))).digest('hex');
 
 // ── Legacy mode: if --dir is passed, run as single-workspace server ──
 const LEGACY_DIR = getArg('dir', null);
@@ -85,7 +88,7 @@ function resolveMockupDir(dir) {
 }
 
 function isMockup(f) {
-  return f.endsWith('.html') && f !== 'harness-template.html';
+  return (f.endsWith('.html') && f !== 'harness-template.html') || /^mockup-[a-z0-9-]+\.json$/.test(f);
 }
 
 function sessionForMockup(ws, mockupId) {
@@ -127,7 +130,7 @@ function lineupRounds(ws) {
     round: session.id, label: session.label || '', open: !session.closed,
     mockups: [...ws.knownFiles]
       .filter(([, data]) => data.session === session.id)
-      .map(([file, data]) => ({ number: data.number, label: labelOf(data.html, file.replace('.html', '')), file }))
+      .map(([file, data]) => ({ number: data.number, label: labelOf(data.html, file.replace(/\.(html|json)$/, '')), file }))
       .sort((a, b) => a.number - b.number),
   })).filter(r => r.mockups.length > 0).reverse();
 }
@@ -169,11 +172,18 @@ function closeOpenSession(ws) {
 
 // Idempotent: while the open round has no mockups, calling it again only
 // updates the label.
-function startRound(ws, label) {
+function startRound(ws, label, question, state) {
   // Files written just before the call still belong to the round being closed.
   pushWorkspaceChanges(ws);
   closeOpenSession(ws);
   const session = getOrCreateOpenSession(ws);
+  if (question !== undefined || state !== undefined) {
+    const brief = workspace.readBrief(ws.mockupDir);
+    if (question !== undefined) brief.question = question;
+    if (state !== undefined) brief.state = state;
+    workspace.atomicWrite(path.join(ws.mockupDir, 'exploration.json'), JSON.stringify(brief, null, 2));
+    broadcastToWorkspace(ws.id, 'brief', { workspace: ws.id, brief });
+  }
   if (label) {
     session.label = label;
     saveSessions(ws);
@@ -196,47 +206,63 @@ function assignToOpenSession(ws, mockupId) {
 
 function scanWorkspace(ws) {
   let files;
-  try { files = fs.readdirSync(ws.mockupDir).filter(isMockup).sort(); }
-  catch { return []; }
-
+  let brief;
+  try {
+    files = fs.readdirSync(ws.mockupDir).filter(isMockup).sort();
+    brief = workspace.readBrief(ws.mockupDir);
+  } catch (error) {
+    broadcastToWorkspace(ws.id, 'workspace-error', { workspace: ws.id, error: error.message });
+    return [];
+  }
+  const briefJSON = JSON.stringify(brief);
+  if (briefJSON !== ws.briefJSON) {
+    ws.briefJSON = briefJSON;
+    broadcastToWorkspace(ws.id, 'brief', { workspace: ws.id, brief });
+  }
   const currentFiles = new Set(files);
   const changes = [];
-
+  const ids = new Set();
   for (const file of files) {
-    const filePath = path.join(ws.mockupDir, file);
-    let stat;
-    try { stat = fs.statSync(filePath); } catch { continue; }
-    const existing = ws.knownFiles.get(file);
-
-    if (!existing) {
-      const html = fs.readFileSync(filePath, 'utf8');
-      const id = file.replace('.html', '');
+    const id = file.replace(/\.(html|json)$/, '');
+    if (ids.has(id)) {
+      changes.push({ type: 'workspace-error', workspace: ws.id, error: `Duplicate design: ${id}. Keep either HTML or JSON.` });
+      continue;
+    }
+    ids.add(id);
+    try {
+      const stat = fs.statSync(path.join(ws.mockupDir, file));
+      const existing = ws.knownFiles.get(file) || [...ws.knownFiles].find(([previous]) => previous.replace(/\.(html|json)$/, '') === id)?.[1];
+      const renderConfig = JSON.stringify({ base: brief.base, styles: brief.styles, data: brief.data });
+      if (ws.knownFiles.has(file) && existing.mtime === stat.mtimeMs && existing.renderConfig === renderConfig && workspace.dependenciesUnchanged(ws.mockupDir, existing.dependencies || {})) continue;
+      const { html, dependencies } = workspace.compose(ws.mockupDir, file, brief);
+      if (existing && html === existing.html && stat.mtimeMs === existing.mtime) {
+        ws.knownFiles.set(file, { ...existing, dependencies, renderConfig });
+        continue;
+      }
       let sessionId = sessionForMockup(ws, id);
-      if (sessionId === null) sessionId = assignToOpenSession(ws, id);
+      if (existing) {
+        const current = ws.sessions.find(s => s.id === existing.session);
+        sessionId = current && !current.closed ? current.id : assignToOpenSession(ws, id);
+      } else if (sessionId === null) sessionId = assignToOpenSession(ws, id);
       const number = numberFor(ws, id);
-      ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session: sessionId, number });
-      changes.push({ type: 'add', id, html, session: sessionId, number, workspace: ws.id });
-    } else if (stat.mtimeMs > existing.mtime) {
-      const html = fs.readFileSync(filePath, 'utf8');
-      const id = file.replace('.html', '');
-      const current = ws.sessions.find(s => s.id === existing.session);
-      const sessionId = current && !current.closed ? current.id : assignToOpenSession(ws, id);
-      ws.knownFiles.set(file, { ...existing, mtime: stat.mtimeMs, html, session: sessionId });
-      changes.push({ type: 'update', id, html, session: sessionId, number: existing.number, workspace: ws.id });
+      const revision = workspace.snapshot(ws.mockupDir, id, html, sessionId, file).revision;
+      ws.knownFiles.set(file, { mtime: stat.mtimeMs, html, session: sessionId, number, revision, dependencies, renderConfig });
+      changes.push({ type: existing ? 'update' : 'add', id, html, session: sessionId, number, revision, workspace: ws.id });
+      ws.errors.delete(file);
+    } catch (error) {
+      if (ws.errors.get(file) !== error.message) {
+        changes.push({ type: 'workspace-error', workspace: ws.id, error: `${file}: ${error.message}` });
+        ws.errors.set(file, error.message);
+      }
     }
   }
-
   for (const [file] of ws.knownFiles) {
     if (!currentFiles.has(file)) {
-      changes.push({ type: 'remove', id: file.replace('.html', ''), workspace: ws.id });
+      const id = file.replace(/\.(html|json)$/, '');
+      if (!ids.has(id)) changes.push({ type: 'remove', id, workspace: ws.id });
       ws.knownFiles.delete(file);
     }
   }
-
-  // Round numbers never restart within a directory: feedback-round-N.md must
-  // not be overwritten when every mockup of a round gets deleted.
-
-  ws.lastActive = Date.now();
   return changes;
 }
 
@@ -288,6 +314,8 @@ function createWorkspace(projectPath, branch, mockupDir) {
     branch: branch || 'default',
     mockupDir,
     knownFiles: new Map(),
+    errors: new Map(),
+    briefJSON: '',
     sessions: [],
     nextSession: 1,
     lastActive: Date.now(),
@@ -315,7 +343,7 @@ function createWorkspace(projectPath, branch, mockupDir) {
     // Directories from before numbering: number by round, then order within it.
     for (const session of ws.sessions) {
       for (const id of session.mockups) {
-        if (fs.existsSync(path.join(ws.mockupDir, id + '.html'))) numberFor(ws, id);
+        if ((fs.existsSync(path.join(ws.mockupDir, id + '.html')) || fs.existsSync(path.join(ws.mockupDir, id + '.json')))) numberFor(ws, id);
       }
     }
   }
@@ -324,6 +352,10 @@ function createWorkspace(projectPath, branch, mockupDir) {
   workspaces.set(id, ws);
   saveWorkspaceState();
   broadcastGlobal('workspace-add', workspaceSummary(ws));
+  for (const [file, data] of ws.knownFiles) {
+    broadcastToWorkspace(ws.id, 'add', { id: file.replace(/\.(html|json)$/, ''), ...data, workspace: ws.id });
+  }
+  broadcastToWorkspace(ws.id, 'brief', { workspace: ws.id, brief: JSON.parse(ws.briefJSON || '{}'), drafts: workspace.readDrafts(ws.mockupDir) });
   return ws;
 }
 
@@ -423,7 +455,14 @@ function workspaceSummary(ws) {
 const template = TEMPLATE_SRC.toString('utf8');
 let browserOpened = false;
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch(error => {
+    if (!res.headersSent) sendJson(res, 400, { error: error.message });
+    else res.end();
+  });
+});
+
+async function handleRequest(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
   const rejection = checkRequestOrigin(req);
@@ -465,9 +504,14 @@ const server = http.createServer(async (req, res) => {
       if (wsId && wsId !== id) continue;
       for (const [file, data] of ws.knownFiles) {
         res.write(`event: add\ndata: ${JSON.stringify({
-          id: file.replace('.html', ''), html: data.html,
-          session: data.session, number: data.number, workspace: id,
+          id: file.replace(/\.(html|json)$/, ''), html: data.html,
+          session: data.session, number: data.number, revision: data.revision, workspace: id,
         })}\n\n`);
+      }
+      try {
+        res.write(`event: brief\ndata: ${JSON.stringify({ workspace: id, brief: workspace.readBrief(ws.mockupDir), drafts: workspace.readDrafts(ws.mockupDir) })}\n\n`);
+      } catch (error) {
+        res.write(`event: workspace-error\ndata: ${JSON.stringify({ workspace: id, error: error.message })}\n\n`);
       }
       for (const session of ws.sessions) {
         res.write(`event: session\ndata: ${JSON.stringify({ ...session, workspace: id })}\n\n`);
@@ -533,7 +577,7 @@ const server = http.createServer(async (req, res) => {
     const ws = mockupDir && [...workspaces.values()].find(w => w.mockupDir === mockupDir);
     if (!ws) { sendJson(res, 404, { error: 'mockupDir is not registered; run bin/register first' }); return; }
     const label = typeof body.label === 'string' ? body.label.trim().slice(0, 80) : '';
-    const session = startRound(ws, label);
+    const session = startRound(ws, label, typeof body.question === 'string' ? body.question : undefined, typeof body.state === 'string' ? body.state : undefined);
     sendJson(res, 200, {
       round: session.id, label: session.label || '',
       feedback: path.join(ws.mockupDir, `feedback-round-${session.id}.md`),
@@ -558,12 +602,45 @@ const server = http.createServer(async (req, res) => {
       // The lineup travels with the feedback, so "#4" in the notes resolves to a file.
       const lineup = formatLineup(lineupRounds(ws));
       const content = typeof body.content === 'string' ? body.content : '';
-      fs.writeFileSync(feedbackPath, lineup ? `${content}\n\n# Lineup\n${lineup}\n` : content);
+      workspace.atomicWrite(feedbackPath, lineup ? `${content}\n\n# Lineup\n${lineup}\n` : content);
       ws.lastActive = Date.now();
+      broadcastToWorkspace(ws.id, 'feedback-submitted', { workspace: ws.id, round });
       sendJson(res, 200, { path: feedbackPath, round });
     } catch (e) {
       sendJson(res, 500, { error: e.message });
     }
+
+  } else if (req.method === 'GET' && url.pathname.match(/^\/workspace\/[^/]+\/revisions$/)) {
+    const ws = workspaceFromPath(url.pathname);
+    if (!ws) { sendJson(res, 404, { error: 'Workspace not found' }); return; }
+    const id = url.searchParams.get('mockup');
+    sendJson(res, 200, { revisions: workspace.readHistory(ws.mockupDir)[id] || [] });
+
+  } else if (req.method === 'GET' && url.pathname.match(/^\/workspace\/[^/]+\/archive$/)) {
+    const ws = workspaceFromPath(url.pathname);
+    if (!ws) { sendJson(res, 404, { error: 'Workspace not found' }); return; }
+    const active = new Set([...ws.knownFiles.keys()].map(file => file.replace(/\.(html|json)$/, '')));
+    const archived = Object.entries(workspace.readHistory(ws.mockupDir)).filter(([id]) => !active.has(id)).map(([id, revisions]) => {
+      const last = revisions[revisions.length - 1];
+      return { id, number: ws.numbers.ids[id], revision: last.revision, label: labelOf(workspace.revisionHTML(ws.mockupDir, id, last.revision).html, id) };
+    });
+    sendJson(res, 200, { archived });
+
+  } else if (req.method === 'GET' && url.pathname.match(/^\/workspace\/[^/]+\/revision$/)) {
+    const ws = workspaceFromPath(url.pathname);
+    if (!ws) { sendJson(res, 404, { error: 'Workspace not found' }); return; }
+    try {
+      sendJson(res, 200, workspace.revisionHTML(ws.mockupDir, url.searchParams.get('mockup'), Number(url.searchParams.get('revision'))));
+    } catch (error) { sendJson(res, 404, { error: error.message }); }
+
+  } else if (req.method === 'POST' && url.pathname.match(/^\/workspace\/[^/]+\/draft$/)) {
+    const ws = workspaceFromPath(url.pathname);
+    if (!ws) { sendJson(res, 404, { error: 'Workspace not found' }); return; }
+    try {
+      const review = workspace.saveDraft(ws.mockupDir, await readBody(req), workspace.readHistory(ws.mockupDir));
+      broadcastToWorkspace(ws.id, 'draft', { workspace: ws.id, review });
+      sendJson(res, 200, review);
+    } catch (error) { sendJson(res, 400, { error: error.message }); }
 
   // ── Context: gather workspace context for AI ───
   } else if (req.method === 'GET' && url.pathname.match(/^\/workspace\/[^/]+\/context$/)) {
@@ -573,10 +650,11 @@ const server = http.createServer(async (req, res) => {
     const mockupList = [];
     for (const [file, data] of ws.knownFiles) {
       mockupList.push({
-        id: file.replace('.html', ''),
+        id: file.replace(/\.(html|json)$/, ''),
         filename: file,
         session: data.session,
         number: data.number,
+        revision: data.revision,
         html: data.html,
       });
     }
@@ -589,8 +667,10 @@ const server = http.createServer(async (req, res) => {
         branch: ws.branch,
         mockupDir: ws.mockupDir,
       },
-      mockups: mockupList,
+      mockups: url.searchParams.has('compact') ? mockupList.map(({ html, ...meta }) => meta) : mockupList,
       sessions: ws.sessions,
+      brief: workspace.readBrief(ws.mockupDir),
+      lineup: formatLineup(lineupRounds(ws)),
     };
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -625,7 +705,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404);
     res.end('Not found');
   }
-});
+}
 
 server.on('error', (e) => {
   console.error(`Design Explorer failed to listen on ${HOST}:${PORT}: ${e.message}`);

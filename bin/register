@@ -13,7 +13,7 @@ set -euo pipefail
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER_JS="$SKILL_DIR/assets/server.js"
 TEMPLATE="$SKILL_DIR/assets/harness-template.html"
-LOG_FILE="$HOME/.claude/design-explorer.log"
+STATE_DIR="$HOME/.claude"
 PORT=10000
 PROJECT=""
 BRANCH=""
@@ -25,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --branch)  BRANCH="$2"; shift 2 ;;
     --dir)     DIR="$2"; shift 2 ;;
     --port)    PORT="$2"; shift 2 ;;
+    --state-dir) STATE_DIR="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -39,10 +40,11 @@ if [[ -z "$BRANCH" ]]; then
   BRANCH=${BRANCH:-default}
 fi
 
-mkdir -p "$DIR" "$HOME/.claude"
+mkdir -p "$DIR" "$STATE_DIR"
+LOG_FILE="$STATE_DIR/design-explorer.log"
 
 BASE="http://127.0.0.1:$PORT"
-EXPECTED_HASH=$(cat "$SERVER_JS" "$TEMPLATE" | node -e '
+EXPECTED_HASH=$(cat "$SERVER_JS" "$TEMPLATE" "$SKILL_DIR/assets/workspace.js" | node -e '
   const h = require("crypto").createHash("sha256");
   process.stdin.on("data", d => h.update(d)).on("end", () => console.log(h.digest("hex")));')
 
@@ -95,11 +97,11 @@ if [[ -z "$PROBE" ]]; then
   # shell (e.g. a Claude Bash task) does not take the server down with it.
   node -e '
     const fs = require("fs");
-    const [node, script, port, log] = process.argv.slice(1);
+    const [node, script, port, log, state] = process.argv.slice(1);
     const out = fs.openSync(log, "a");
-    require("child_process").spawn(node, [script, "--port", port, "--no-open"], {
+    require("child_process").spawn(node, [script, "--port", port, "--state-dir", state, "--no-open"], {
       detached: true, stdio: ["ignore", out, out],
-    }).unref();' "$(command -v node)" "$SERVER_JS" "$PORT" "$LOG_FILE"
+    }).unref();' "$(command -v node)" "$SERVER_JS" "$PORT" "$LOG_FILE" "$STATE_DIR"
 
   wait_until '[[ "$(probe)" == "$EXPECTED_HASH "* ]]' || fail "server did not start on port $PORT"
 fi

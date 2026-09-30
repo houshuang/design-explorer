@@ -1,0 +1,74 @@
+{
+  "claim": "A school curriculum that systematically imparts shared knowledge is the most effective way to narrow the reading test-score gap among social groups.",
+  "summary": {
+    "verdict": "Hirsch gives a plausible mechanism and some encouraging school and study results for shared, knowledge-rich teaching, but the evidence does not establish that it reliably narrows reading gaps. His stronger claim that it is the most effective way is not supported as stated: the evidence does not provide a sound comparison with the main alternatives or reliably show that disadvantaged pupils gain more.",
+    "status": "partly_supported",
+    "what_would_settle_it": "Independent, multi-year comparisons under ordinary school conditions would need to test a specified shared curriculum against credible alternatives, use broad reading outcomes as well as taught-content tests, and directly measure whether treatment narrows gaps between socioeconomic and other groups."
+  },
+  "nodes": [
+    {
+      "id": "C",
+      "kind": "conclusion",
+      "label": "Most effective way to narrow reading gaps",
+      "text": "A school curriculum that systematically imparts shared knowledge is the most effective way to narrow the reading test-score gap among social groups.",
+      "status": "partly_supported",
+      "why": "Hirsch’s argument is supported by a plausible learning mechanism and some positive results, but the evidence does not establish reliable gap closure or superiority to the main alternatives."
+    },
+    {
+      "id": "N1",
+      "kind": "empirical_premise",
+      "label": "Unequal background knowledge contributes to group gaps",
+      "text": "Hirsch argues that disadvantaged children often enter school with less of the language and background knowledge needed to understand texts, while advantaged children acquire more of it at home. He presents this knowledge gap as a major contributor to later reading and achievement gaps.",
+      "status": "partly_supported",
+      "why": "Hirsch cites evidence of differences in language exposure and prior-knowledge effects on comprehension, but those findings alone do not establish that this is the main cause of group reading gaps."
+    },
+    {
+      "id": "N2",
+      "kind": "empirical_premise",
+      "label": "Schools can supply knowledge not reliably supplied at home",
+      "text": "Hirsch argues that schools should deliberately provide disadvantaged children with the knowledge and language that more advantaged children are more likely to encounter at home. He treats school teaching as a way to compensate for unequal home environments.",
+      "status": "partly_supported",
+      "why": "The cited evidence supports a narrower claim that school quality can matter more for some disadvantaged groups, but it does not show that shared curriculum content alone produces that effect."
+    },
+    {
+      "id": "N3",
+      "kind": "empirical_premise",
+      "label": "Coherent, cumulative teaching can build knowledge and vocabulary",
+      "text": "Hirsch argues that systematically teaching connected content across grades builds on what pupils already know. In his account, disadvantaged pupils can learn more from later lessons when schools supply missing prior knowledge rather than leaving each class to assume it.",
+      "status": "partly_supported",
+      "why": "Research cited by Hirsch supports the importance of prior knowledge and the plausibility of cumulative learning, but it does not by itself prove that a common sequence reliably narrows demographic gaps."
+    },
+    {
+      "id": "N4",
+      "kind": "claim",
+      "label": "Knowledge-rich schools narrow gaps in practice",
+      "text": "Schools and programmes that teach a shared, knowledge-rich curriculum have narrowed gaps between advantaged and disadvantaged pupils.",
+      "status": "partly_supported",
+      "why": "There are positive results, but the strongest study’s emphasized effect is not its registered grade-six result, and its design does not isolate curriculum content or establish treatment-induced gap closure."
+    },
+    {
+      "id": "N5",
+      "kind": "missing_premise",
+      "label": "It beats the alternatives",
+      "text": "A shared-knowledge curriculum narrows gaps more than other approaches would (funding, preschool, class size, tutoring, strategy instruction, reducing poverty).",
+      "status": "asserted_without_evidence",
+      "why": "Hirsch criticizes alternatives and makes a superlative claim, but the supplied evidence does not compare the curriculum against the full range of alternative interventions."
+    },
+    {
+      "id": "N6",
+      "kind": "value_premise",
+      "label": "Schools should reduce dependence on home background",
+      "text": "Hirsch treats equal opportunity as a central purpose of schooling: children’s access to academic knowledge and literacy should not depend on what their homes happen to provide.",
+      "status": "value_premise",
+      "why": "This is a normative commitment about what schools owe children, not a factual claim established by test results."
+    },
+    {
+      "id": "N7",
+      "kind": "empirical_premise",
+      "label": "Reading scores are knowledge-sensitive measures",
+      "text": "Hirsch argues that general reading tests depend substantially on background knowledge, not only on a general reading skill. This helps explain why he treats reading-score gaps as relevant to a knowledge curriculum, but it also makes it important to distinguish taught-content gains from broader reading comprehension.",
+      "status": "contested",
+      "why": "Prior knowledge can affect performance on a text, but the evidence supplied does not establish that general reading tests are merely knowledge tests or that gains on them show broad reading improvement."
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "question": "Where should Rapporter feil appear on a programme page?",
+  "state": "Dialog closed; each entry point opens the same working dialog",
+  "approved": [
+    "Existing Kulturbase navy/white identity and red playback button",
+    "Programme copy, metadata, image and cast remain fixed",
+    "Compare discoverability without distracting from watching"
+  ],
+  "base": "shared/page.html",
+  "styles": [
+    "shared/style.css"
+  ],
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  }
+}

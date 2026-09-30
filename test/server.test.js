@@ -76,10 +76,11 @@ test('no wildcard CORS header', async () => {
   assert.equal(r.headers['access-control-allow-origin'], undefined);
 });
 
-test('health reports the code hash of server.js + harness', async () => {
+test('health reports the code hash of server, harness and composer', async () => {
   const h = crypto.createHash('sha256')
     .update(fs.readFileSync(path.join(REPO, 'assets/server.js')))
     .update(fs.readFileSync(path.join(REPO, 'assets/harness-template.html')))
+    .update(fs.readFileSync(path.join(REPO, 'assets/workspace.js')))
     .digest('hex');
   const r = JSON.parse((await request({ pathname: '/health' })).body);
   assert.equal(r.app, 'design-explorer');
@@ -310,6 +311,85 @@ test('bin/round fails loudly for an unregistered directory', async () => {
     assert.match(r.stderr, /not registered/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shared dependency edits recompose revisions; switching format and archiving preserve identity', async () => {
+  const dir=`${MOCKUP_DIR}-shared`;
+  fs.mkdirSync(path.join(dir,'shared'),{recursive:true});
+  const file='mockup-card.html';
+  const fragment='<section class="mockup-section" data-mockup-id="mockup-card" data-label="Card"><h1>Evidence</h1></section>';
+  fs.writeFileSync(path.join(dir,file),fragment);
+  fs.writeFileSync(path.join(dir,'shared/style.css'),'h1{color:navy}');
+  fs.writeFileSync(path.join(dir,'exploration.json'),JSON.stringify({styles:['shared/style.css']}));
+  try {
+    const registered=await register(['--project',REPO,'--dir',dir,'--port',String(PORT)]);
+    assert.equal(registered.code,0,registered.stderr);
+    const ws=registered.stdout;
+    const getContext=async()=>{
+      await lineup(dir);
+      return JSON.parse((await request({pathname:`/workspace/${ws}/context`})).body);
+    };
+    const first=await getContext();
+    assert.equal(first.mockups[0].revision,1);
+    const modified=new Date(Date.now()+1000);
+    fs.writeFileSync(path.join(dir,'shared/style.css'),'h1{color:rust}');
+    fs.utimesSync(path.join(dir,'shared/style.css'),modified,modified);
+    const next=await getContext();
+    assert.equal(next.mockups[0].revision,2);
+    assert.ok(next.mockups[0].html.includes('color:rust'));
+    const old=JSON.parse((await request({pathname:`/workspace/${ws}/revision?mockup=mockup-card&revision=1`})).body);
+    assert.ok(old.html.includes('color:navy'));
+    const stat=fs.statSync(path.join(dir,file));
+    fs.unlinkSync(path.join(dir,file));
+    fs.writeFileSync(path.join(dir,'mockup-card.json'),JSON.stringify({label:'Card',html:'<h1>Evidence</h1>'}));
+    fs.utimesSync(path.join(dir,'mockup-card.json'),stat.atime,stat.mtime);
+    const converted=await getContext();
+    assert.equal(converted.mockups.length,1);
+    assert.equal(converted.mockups[0].id,'mockup-card');
+    assert.equal(converted.mockups[0].number,first.mockups[0].number);
+    fs.unlinkSync(path.join(dir,'mockup-card.json'));
+    await getContext();
+    const archive=JSON.parse((await request({pathname:`/workspace/${ws}/archive`})).body);
+    assert.equal(archive.archived[0].id,'mockup-card');
+    assert.equal(archive.archived[0].number,1);
+    fs.writeFileSync(path.join(dir,'exploration.json'),'{invalid');
+    const events=await request({pathname:`/events?workspace=${ws}`,headers:{Accept:'text/event-stream'}});
+    assert.ok(events.body.includes('workspace-error'));
+    assert.ok(events.body.includes('init-complete'));
+    assert.equal((await request({pathname:'/health'})).status,200);
+  } finally {
+    await request({method:'DELETE',pathname:`/workspace/${path.basename(dir)}`});
+    fs.rmSync(dir,{recursive:true,force:true});
+  }
+});
+
+test('begin, compact context and bounded feedback work through the real CLI', async () => {
+  const dir=`${MOCKUP_DIR}-helpers`;
+  const cli=(name,args)=>new Promise(resolve=>execFile(path.join(REPO,'bin',name),[...args,'--port',String(PORT)],{env},(error,stdout,stderr)=>resolve({code:error?.code||0,stdout,stderr})));
+  try {
+    const begin=await cli('begin',['--project',REPO,'--dir',dir,'--question','Where should the control go?','--state','Dialog closed']);
+    assert.equal(begin.code,0,begin.stderr);
+    assert.match(begin.stdout,/Round 1/);
+    fs.writeFileSync(path.join(dir,'mockup-a.html'),mockup('mockup-a'));
+    const context=await cli('context',['--dir',dir]);
+    assert.equal(context.code,0,context.stderr);
+    assert.match(context.stdout,/Dialog closed/);
+    assert.match(context.stdout,/#1/);
+    assert.ok(!context.stdout.includes('<section'));
+    const posted=await request({method:'POST',pathname:`/workspace/${path.basename(dir)}/feedback`,headers:json,body:{content:'Keep this control'}});
+    assert.equal(posted.status,200);
+    const feedback=await cli('feedback',['--dir',dir,'--round','1']);
+    assert.equal(feedback.code,0,feedback.stderr);
+    assert.match(feedback.stdout,/Keep this control/);
+    const hash=feedback.stdout.match(/Submission: ([a-f0-9]+)/)[1];
+    const old=await cli('feedback',['--dir',dir,'--round','1','--after',hash,'--wait-seconds','0']);
+    assert.match(old.stdout,/No new submitted feedback/);
+    const excessive=await cli('feedback',['--dir',dir,'--round','1','--wait-seconds','61']);
+    assert.notEqual(excessive.code,0);
+  } finally {
+    await request({method:'DELETE',pathname:`/workspace/${path.basename(dir)}`});
+    fs.rmSync(dir,{recursive:true,force:true});
   }
 });
 
