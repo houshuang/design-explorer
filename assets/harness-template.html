@@ -14,24 +14,39 @@
     /* ── Workspace bar ────────────────────────── */
     #workspace-bar {
       position: fixed; top: 0; left: 0; right: 0; z-index: 150;
-      height: 36px; display: flex; align-items: center; gap: 0;
+      height: 36px; display: flex; align-items: stretch; gap: 0;
       background: #1a1a1a; padding: 0 12px; display: none;
+      overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: #444 transparent;
     }
     .ws-tab {
-      padding: 6px 14px; font-size: 12px; font-weight: 500; cursor: pointer;
-      color: #888; border: none; background: none; font-family: inherit;
-      border-bottom: 2px solid transparent; transition: all 0.15s;
-      display: flex; align-items: center; gap: 6px; white-space: nowrap;
+      flex: 0 1 auto; min-width: 90px; max-width: 240px;
+      display: flex; align-items: center;
+      border-bottom: 2px solid transparent; transition: border-color 0.15s;
     }
-    .ws-tab:hover { color: #ccc; }
-    .ws-tab.active { color: #fff; border-bottom-color: #fff; }
+    .ws-tab.active { border-bottom-color: #fff; }
+    .ws-select {
+      flex: 1 1 auto; min-width: 0; height: 100%;
+      padding: 0 4px 0 12px; font-size: 12px; font-weight: 500; cursor: pointer;
+      color: #888; border: none; background: none; font-family: inherit;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .ws-select:hover, .ws-tab.active .ws-select { color: #fff; }
+    .ws-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ws-close {
+      flex: none; width: 20px; height: 20px; margin-right: 4px; border-radius: 4px;
+      border: none; background: none; color: #666; cursor: pointer;
+      font: 14px/1 inherit; display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .ws-tab:hover .ws-close, .ws-tab.active .ws-close, .ws-close:focus-visible { opacity: 1; }
+    .ws-close:hover { background: #333; color: #fff; }
     .ws-tab .ws-dot {
-      width: 6px; height: 6px; border-radius: 50%;
+      flex: none; width: 6px; height: 6px; border-radius: 50%;
       background: #555; transition: background 0.3s;
     }
     .ws-tab.active .ws-dot { background: #22c55e; }
     .ws-tab .ws-badge {
-      font-size: 10px; background: #ef4444; color: #fff; padding: 0 5px;
+      flex: none; font-size: 10px; background: #ef4444; color: #fff; padding: 0 5px;
       border-radius: 8px; min-width: 16px; text-align: center;
       animation: badgePop 0.3s ease-out;
     }
@@ -280,6 +295,9 @@
     let currentSession = null;
     const sessionLabels = new Map(); // `${workspace}:${id}` → label
     let currentWorkspace = new URLSearchParams(location.search).get('workspace'); // workspace ID or null (show all)
+    // The workspace the URL asks for. It may not be registered yet (or was closed and is being
+    // re-registered), so the page falls back to another one and switches as soon as it appears.
+    let requestedWorkspace = currentWorkspace;
     let knownWorkspaces = [];    // [{id, projectName, branch, mockups, lastActive}]
     let notesActive = false;
     let recording = false;
@@ -875,7 +893,10 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       es.addEventListener('remove', (e) => removeMockup(JSON.parse(e.data)));
       es.addEventListener('workspaces', (e) => {
         knownWorkspaces = JSON.parse(e.data);
-        if (knownWorkspaces.length > 0 && !knownWorkspaces.some(w=>w.id===currentWorkspace)) {
+        const requested = knownWorkspaces.find(w => w.id === requestedWorkspace);
+        if (requested && initialized) { selectWorkspace(requested); updateWorkspaceTabs(); return; }
+        if (requested) currentWorkspace = requested.id;
+        else if (knownWorkspaces.length > 0 && !knownWorkspaces.some(w=>w.id===currentWorkspace)) {
           currentWorkspace = knownWorkspaces[0].id;
         }
         updateWorkspaceTabs();
@@ -887,6 +908,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
           // Auto-select first workspace, show badge on others
           if (knownWorkspaces.length === 1) currentWorkspace = ws.id;
         }
+        if (ws.id === requestedWorkspace && currentWorkspace !== ws.id) { selectWorkspace(ws); return; }
         updateWorkspaceTabs();
       });
       es.addEventListener('workspace-remove', (e) => {
@@ -923,6 +945,29 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       es.onerror = () => { es.close(); setTimeout(connectSSE, 2000); };
     }
 
+    // Mockup directories end in `-<epoch ms>-<hex>` to stay unique; that suffix is noise in a tab.
+    function workspaceLabel(id) {
+      return id.replace(/-\d{10,}-[0-9a-f]{4,}$/, '');
+    }
+
+    function selectWorkspace(ws) {
+      if (currentWorkspace === ws.id) return;
+      if(recording)return;
+      currentWorkspace = ws.id;
+      requestedWorkspace = ws.id;
+      const url = new URL(location.href);
+      url.searchParams.set('workspace', ws.id);
+      history.replaceState(null, '', url);
+      pendingWorkspaces.delete(ws.id);
+      hasUserSelectedSession=false;
+      currentSession = null;
+      currentIndex = 0;
+      goTo(0);
+      updateWorkspaceTabs();
+      updateSessionPills();
+      document.title = `${ws.projectName} (${ws.branch}) — Design Explorer`;
+    }
+
     // ── Workspace tabs ────────────────────────────
     function updateWorkspaceTabs() {
       const multi = knownWorkspaces.length > 1;
@@ -939,33 +984,41 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       }
 
       workspaceBar.innerHTML = '';
+      let activeTab = null;
       for (const ws of knownWorkspaces) {
-        const tab = document.createElement('button');
+        const tab = document.createElement('div');
         tab.className = 'ws-tab' + (currentWorkspace === ws.id ? ' active' : '');
+        if (currentWorkspace === ws.id) activeTab = tab;
 
+        const select = document.createElement('button');
+        select.className = 'ws-select';
         const dot = document.createElement('span');
         dot.className = 'ws-dot';
-        tab.appendChild(dot);
-        if(pendingWorkspaces.has(ws.id)){const badge=document.createElement('span');badge.className='ws-badge';badge.textContent='New';tab.appendChild(badge)}
+        select.appendChild(dot);
+        if(pendingWorkspaces.has(ws.id)){const badge=document.createElement('span');badge.className='ws-badge';badge.textContent='New';select.appendChild(badge)}
+        const name = document.createElement('span');
+        name.className = 'ws-name';
+        name.textContent = workspaceLabel(ws.id);
+        select.appendChild(name);
+        select.title = `${ws.id}\n${ws.projectName} (${ws.branch}) — ${ws.mockupDir}`;
+        select.onclick = () => selectWorkspace(ws);
 
-        tab.appendChild(document.createTextNode(ws.id));
-        tab.title = `${ws.projectName} (${ws.branch}) — ${ws.mockupDir}`;
-
-        tab.onclick = () => {
-          if (currentWorkspace === ws.id) return;
-          if(recording)return;
-          currentWorkspace = ws.id;
-          pendingWorkspaces.delete(ws.id);
-          hasUserSelectedSession=false;
-          currentSession = null;
-          currentIndex = 0;
-          goTo(0);
-          updateWorkspaceTabs();
-          updateSessionPills();
-          document.title = `${ws.projectName} (${ws.branch}) — Design Explorer`;
+        const close = document.createElement('button');
+        close.className = 'ws-close';
+        close.textContent = '×';
+        close.title = 'Close tab (mockup files are kept)';
+        close.setAttribute('aria-label', `Close ${workspaceLabel(ws.id)}`);
+        close.onclick = async (event) => {
+          event.stopPropagation();
+          if (recording) return;
+          try { await fetch(`/workspace/${encodeURIComponent(ws.id)}`, { method: 'DELETE', signal: AbortSignal.timeout(5000) }); }
+          catch (error) { setStatus(`Could not close tab: ${error.message}`, true); }
         };
+
+        tab.append(select, close);
         workspaceBar.appendChild(tab);
       }
+      if (activeTab) activeTab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
       const activeWs = knownWorkspaces.find(w => w.id === currentWorkspace);
       if (activeWs) {

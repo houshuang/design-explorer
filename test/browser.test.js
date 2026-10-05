@@ -200,6 +200,22 @@ test(
       fs.readFileSync(path.join(dirs[1], "review-drafts.json"), "utf8"),
     );
     assert.equal(voiceDrafts["mockup-next:r1"].notes, "Voice belongs to beta next");
+    const longDir = path.join(root, "coverage-ui-1791183933827-dc88bb");
+    fs.mkdirSync(longDir);
+    fs.writeFileSync(path.join(longDir, "mockup-same.html"), html("gamma"));
+    const third = await api("/workspace/register", { projectPath: root, mockupDir: longDir });
+    const thirdTab = page.locator(".ws-tab").filter({ hasText: "coverage-ui" });
+    await thirdTab.waitFor();
+    assert.match(await thirdTab.locator(".ws-name").textContent(), /coverage-ui$/);
+    await thirdTab.hover();
+    await thirdTab.locator(".ws-close").click();
+    await page.waitForFunction(() => document.querySelectorAll(".ws-tab").length === 2);
+    assert.ok(!(await api("/workspaces")).some((ws) => ws.id === third.id));
+    assert.ok(fs.existsSync(path.join(longDir, "mockup-same.html")));
+    await page.goto(`${base}/?workspace=${third.id}`);
+    await page.locator("#counter").filter({ hasText: /alpha|beta/ }).waitFor();
+    await api("/workspace/register", { projectPath: root, mockupDir: longDir });
+    await page.locator("#counter").filter({ hasText: "gamma" }).waitFor();
     assert.deepEqual(errors, []);
   },
 );
