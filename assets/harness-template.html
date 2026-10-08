@@ -391,7 +391,6 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       if (vi.length === 0) return;
       idx = Math.max(0, Math.min(idx, vi.length - 1));
       currentIndex = idx;
-      carousel.style.transform = `translateX(-${vi[idx] * 100}vw)`;
       closeComparison();
       markSeen(currentMockup());
       updateUI();
@@ -451,6 +450,9 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         counterEl.append(num, ` ${m.label} `, pos);
       }
 
+      // The carousel holds every workspace's slides, so its offset must follow whichever path
+      // changed the selection (initial load, a late-arriving workspace), not only goTo().
+      if (m) carousel.style.transform = `translateX(-${mockups.indexOf(m) * 100}vw)`;
       updateReviewBrief();
       if (!m) return;
       neutralBtn.className = 'vote-btn' + (m.vote === 'neutral' ? ' active-up' : '');

@@ -216,6 +216,22 @@ test(
     await page.locator("#counter").filter({ hasText: /alpha|beta/ }).waitFor();
     await api("/workspace/register", { projectPath: root, mockupDir: longDir });
     await page.locator("#counter").filter({ hasText: "gamma" }).waitFor();
+    const waitForShownWorkspace = (workspace) =>
+      page.waitForFunction(
+        (workspace) =>
+          [...document.querySelectorAll(".slide")].some(
+            (slide) =>
+              slide.dataset.id.startsWith(`${workspace}:`) &&
+              Math.abs(slide.getBoundingClientRect().left) < 2,
+          ),
+        workspace,
+        { timeout: 3000 },
+      );
+    await waitForShownWorkspace(third.id);
+    // Alpha's slide comes first in the carousel, so a fresh load must still move to beta's.
+    await page.goto(`${base}/?workspace=${second.id}`);
+    await page.locator("#counter").filter({ hasText: "beta" }).waitFor();
+    await waitForShownWorkspace(second.id);
     assert.deepEqual(errors, []);
   },
 );
