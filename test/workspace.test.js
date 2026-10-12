@@ -117,6 +117,18 @@ test("local images are copied as bytes by the composer, with traversal checks", 
   assert.throws(() => compose(dir, "mockup-image.json"));
 });
 
+test("image paths built in script are left alone; attributes are still embedded", (t) => {
+  const dir = fixture(t);
+  fs.writeFileSync(path.join(dir, "shared/picture.png"), Buffer.from([137, 80, 78, 71]));
+  fs.writeFileSync(
+    path.join(dir, "mockup-script.html"),
+    `<section class="mockup-section"><img src="shared/picture.png"><script>const im = new Image(); im.src='shared/letters/'+name;</script></section>`,
+  );
+  const { html } = compose(dir, "mockup-script.html");
+  assert.ok(html.includes("data:image/png;base64,iVBORw=="));
+  assert.ok(html.includes("im.src='shared/letters/'+name"));
+});
+
 test("style changes create immutable revisions while identical content reuses its version", (t) => {
   const dir = fixture(t);
   const file = "mockup-style.json";

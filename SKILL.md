@@ -54,7 +54,7 @@ Render and inspect each direction before presenting it. Check the intended viewp
 
 ## Review and iterate
 
-Run `bin/lineup --dir "<directory>"` and post this round's numbered labels with the review URL. Numbers identify designs, not carousel positions. Preserve the small number-to-design mapping in chat; do not replace it with a long walkthrough. Name the design when acting on a number from feedback.
+Run `bin/lineup --dir "<directory>"`; it also lists any design that failed to compose, with the error, so fix that file rather than re-registering. Post this round's numbered labels with the review URL. Numbers identify designs, not carousel positions. Preserve the small number-to-design mapping in chat; do not replace it with a long walkthrough. Name the design when acting on a number from feedback.
 
 The reviewer can navigate, like/reject or mark neutral, add notes/voice, point at an element, change viewport width, pin a revision, and compare at the same width or side by side. Notes autosave; **Submit/C** sends the round to you. Revised designs keep their number but get a new revision; previous feedback stays attached to the version reviewed.
 

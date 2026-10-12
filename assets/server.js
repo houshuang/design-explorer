@@ -135,11 +135,21 @@ function lineupRounds(ws) {
   })).filter(r => r.mockups.length > 0).reverse();
 }
 
-function formatLineup(rounds) {
-  return rounds.map(r => [
-    `Round ${r.round}${r.label ? ' · ' + r.label : ''}${r.open ? ' (open)' : ''}`,
-    ...r.mockups.map(m => `  #${m.number}  ${m.label}  (${m.file})`),
-  ].join('\n')).join('\n');
+// Files that fail to compose are absent from the rounds; list them so the
+// agent sees why a design it wrote is missing.
+function lineupErrors(ws) {
+  return [...ws.errors].map(([file, error]) => ({ file, error }));
+}
+
+function formatLineup(rounds, errors = []) {
+  return [
+    ...rounds.map(r => [
+      `Round ${r.round}${r.label ? ' · ' + r.label : ''}${r.open ? ' (open)' : ''}`,
+      ...r.mockups.map(m => `  #${m.number}  ${m.label}  (${m.file})`),
+    ].join('\n')),
+    ...(errors.length ? [['Not shown (fix and save to retry):',
+      ...errors.map(e => `  ${e.file}: ${e.error}`)].join('\n')] : []),
+  ].join('\n');
 }
 
 function getOrCreateOpenSession(ws) {
@@ -255,6 +265,9 @@ function scanWorkspace(ws) {
         ws.errors.set(file, error.message);
       }
     }
+  }
+  for (const file of ws.errors.keys()) {
+    if (!currentFiles.has(file)) ws.errors.delete(file);
   }
   for (const [file] of ws.knownFiles) {
     if (!currentFiles.has(file)) {
@@ -568,7 +581,8 @@ async function handleRequest(req, res) {
     if (!ws) { sendJson(res, 404, { error: 'dir is not registered; run bin/register first' }); return; }
     pushWorkspaceChanges(ws);
     const rounds = lineupRounds(ws);
-    sendJson(res, 200, { rounds, text: formatLineup(rounds) });
+    const errors = lineupErrors(ws);
+    sendJson(res, 200, { rounds, errors, text: formatLineup(rounds, errors) });
 
   // ── Start a new round (bin/round) ─────────────
   } else if (req.method === 'POST' && url.pathname === '/round') {
@@ -600,7 +614,7 @@ async function handleRequest(req, res) {
       // Feedback on the open round closes it; the next files start a new one.
       if (session && session.id === ws.openSessionId) closeOpenSession(ws);
       // The lineup travels with the feedback, so "#4" in the notes resolves to a file.
-      const lineup = formatLineup(lineupRounds(ws));
+      const lineup = formatLineup(lineupRounds(ws), lineupErrors(ws));
       const content = typeof body.content === 'string' ? body.content : '';
       workspace.atomicWrite(feedbackPath, lineup ? `${content}\n\n# Lineup\n${lineup}\n` : content);
       ws.lastActive = Date.now();
@@ -670,7 +684,7 @@ async function handleRequest(req, res) {
       mockups: url.searchParams.has('compact') ? mockupList.map(({ html, ...meta }) => meta) : mockupList,
       sessions: ws.sessions,
       brief: workspace.readBrief(ws.mockupDir),
-      lineup: formatLineup(lineupRounds(ws)),
+      lineup: formatLineup(lineupRounds(ws), lineupErrors(ws)),
     };
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
