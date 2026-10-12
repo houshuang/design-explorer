@@ -68,6 +68,6 @@ The harness supplies:
 - Lucide: `<i data-lucide="search" class="w-5 h-5"></i>`.
 - Border-box sizing, zero body margin and Inter fallback.
 
-Images can use the product's full-resolution HTTPS URLs or data URIs. To reuse local assets, copy them under `shared/` and use a relative image source such as `<img src="shared/screenshot.png">`. The composer embeds these bytes automatically. Do not regenerate base64 image bytes through the model. Keep assets inside the workspace; project file paths do not load in the iframe.
+Images can use the product's full-resolution HTTPS URLs or data URIs. To reuse local assets, copy them under `shared/` and use a relative image source such as `<img src="shared/screenshot.png">`. The composer embeds these bytes automatically, but only for literal `src`/`poster` attributes in the markup; a path built in script (`img.src = 'shared/' + name`) is not embedded and does not load in the iframe, so write the `<img>` tags out. Do not regenerate base64 image bytes through the model. Keep assets inside the workspace; project file paths do not load in the iframe.
 
 Mockups run in `sandbox="allow-scripts"` without same-origin access. Feedback and persistence belong to the outer reviewer. Alt+arrow shortcuts work from inside a mockup without taking its ordinary arrow-key interactions. Optional `data-region` names improve anchored notes; no annotation is required for every element.

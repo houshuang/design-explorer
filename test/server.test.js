@@ -302,6 +302,30 @@ test('mockups keep one number per directory; bin/lineup maps numbers to files', 
   }
 });
 
+test('bin/lineup names designs that fail to compose, and drops them once removed', async () => {
+  const dir = `${MOCKUP_DIR}-errors`;
+  fs.mkdirSync(dir, { recursive: true });
+  const bad = '<section class="mockup-section" data-label="Broken"><img src="shared/notes.txt"></section>';
+  try {
+    assert.equal((await register(['--project', REPO, '--dir', dir, '--port', String(PORT)])).code, 0);
+    await round(['--dir', dir, '--label', 'first']);
+    fs.writeFileSync(path.join(dir, 'mockup-ok.html'), '<section class="mockup-section" data-label="Fine"><p>ok</p></section>');
+    fs.writeFileSync(path.join(dir, 'mockup-bad.html'), bad);
+    await waitForSessions(dir, (s) => s.length === 1 && s[0].mockups.length === 1);
+    assert.equal((await lineup(dir)).stdout, [
+      'Round 1 · first (open)',
+      '  #1  Fine  (mockup-ok.html)',
+      'Not shown (fix and save to retry):',
+      '  mockup-bad.html: Shared images must be PNG, JPEG, WebP, GIF or SVG',
+    ].join('\n'));
+    fs.rmSync(path.join(dir, 'mockup-bad.html'));
+    assert.doesNotMatch((await lineup(dir)).stdout, /Not shown/);
+  } finally {
+    await request({ method: 'DELETE', pathname: `/workspace/${path.basename(dir)}` });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('bin/round fails loudly for an unregistered directory', async () => {
   const dir = `${MOCKUP_DIR}-unregistered`;
   fs.mkdirSync(dir, { recursive: true });
