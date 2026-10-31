@@ -326,6 +326,31 @@ test('bin/lineup names designs that fail to compose, and drops them once removed
   }
 });
 
+test('bin/lineup marks designs that never read mockupCase when the brief has cases', async () => {
+  const dir = `${MOCKUP_DIR}-cases`;
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'shared/people.json'), JSON.stringify({ light: { name: 'Bergen' }, heavy: { name: 'Henrik Ibsen' } }));
+  fs.writeFileSync(path.join(dir, 'exploration.json'), JSON.stringify({ data: 'shared/people.json', cases: { light: 'Bergen', heavy: 'Henrik Ibsen' } }));
+  try {
+    assert.equal((await register(['--project', REPO, '--dir', dir, '--port', String(PORT)])).code, 0);
+    await round(['--dir', dir, '--label', 'first']);
+    fs.writeFileSync(path.join(dir, 'mockup-reads.json'), JSON.stringify({ label: 'Reads', html: '<h1 id=n></h1><script>n.textContent=mockupCase.name</script>' }));
+    fs.writeFileSync(path.join(dir, 'mockup-static.html'), '<section class="mockup-section" data-label="Static"><h1>Bergen</h1></section>');
+    await waitForSessions(dir, (s) => s.length === 1 && s[0].mockups.length === 2);
+    assert.equal((await lineup(dir)).stdout, [
+      'Round 1 · first (open)',
+      '  #1  Reads  (mockup-reads.json)',
+      '  #2  Static  (mockup-static.html)  [same for every case: never reads mockupCase]',
+    ].join('\n'));
+    // The brief precedes the designs, so the reviewer knows the cases before it builds a preview.
+    const events = (await request({ pathname: `/events?workspace=${path.basename(dir)}`, headers: { Accept: 'text/event-stream' } })).body;
+    assert.ok(events.indexOf('event: brief') < events.indexOf('event: add'));
+  } finally {
+    await request({ method: 'DELETE', pathname: `/workspace/${path.basename(dir)}` });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('bin/round fails loudly for an unregistered directory', async () => {
   const dir = `${MOCKUP_DIR}-unregistered`;
   fs.mkdirSync(dir, { recursive: true });

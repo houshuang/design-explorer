@@ -181,3 +181,30 @@ test("feedback autosaves per revision, distinguishes neutral and unseen, and rej
     /Unknown/,
   );
 });
+
+test("cases must name labelled keys of an object fixture", (t) => {
+  const dir = fixture(t);
+  const brief = (extra) =>
+    fs.writeFileSync(
+      path.join(dir, "exploration.json"),
+      JSON.stringify({ data: "shared/cases.json", ...extra }),
+    );
+  fs.writeFileSync(
+    path.join(dir, "shared/cases.json"),
+    JSON.stringify({ light: { name: "Bergen" }, heavy: { name: "Henrik Ibsen" } }),
+  );
+  fs.writeFileSync(
+    path.join(dir, "mockup-case.json"),
+    JSON.stringify({ label: "Case", html: "<h1 id=n></h1><script>n.textContent=mockupCase.name</script>" }),
+  );
+  brief({ cases: { light: "Bergen", heavy: "Henrik Ibsen" } });
+  assert.ok(compose(dir, "mockup-case.json").html.includes('"heavy":{"name":"Henrik Ibsen"}'));
+  brief({ cases: { light: "Bergen", missing: "Nobody" } });
+  assert.throws(() => compose(dir, "mockup-case.json"), /Case missing is not a key in shared\/cases\.json/);
+  brief({ cases: { light: "" } });
+  assert.throws(() => compose(dir, "mockup-case.json"), /needs a label/);
+  brief({ cases: ["light", "heavy"] });
+  assert.throws(() => compose(dir, "mockup-case.json"), /cases must map/);
+  brief({ data: "shared/data.json", cases: { 0: "First" } });
+  assert.throws(() => compose(dir, "mockup-case.json"), /data object keyed by case/);
+});

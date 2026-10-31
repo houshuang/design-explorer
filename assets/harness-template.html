@@ -232,6 +232,9 @@
     #review-tools {display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;font-size:12px}
     #review-tools button,#review-tools select {font:inherit;border:1px solid #ddd;border-radius:6px;background:#fff;padding:5px 9px;color:#555}
     #review-tools button[aria-pressed="true"] {background:#333;color:#fff}
+    #cases {display:inline-flex;flex-wrap:wrap;max-width:100%;gap:2px;padding:2px;border:1px solid #ddd;border-radius:8px}
+    #cases[hidden] {display:none}
+    #review-tools #cases button {border:0;padding:4px 9px}
     #review-status {color:#777;min-height:16px;font-size:12px;text-align:center;margin-top:6px}
     #review-status.error {color:#b42318}
     .slide-content.side-by-side {display:flex;gap:16px;align-items:flex-start}
@@ -255,6 +258,7 @@
 
   <div id="bottom-bar" style="display:none">
     <div id="review-tools">
+      <span id="cases" role="group" aria-label="Case" hidden></span>
       <label>Width <select id="viewport"><option value="default">Product</option><option value="auto">Window</option><option value="390">390</option><option value="768">768</option><option value="1280">1280</option></select></label>
       <button id="pin-btn" title="Keep this version as a comparison reference">Pin</button>
       <label>Reference <select id="reference"><option value="">Choose…</option></select></label>
@@ -282,6 +286,7 @@
     <div class="sc-row"><span class="sc-key"><kbd>F</kbd></span><span class="sc-label">Fit to window</span></div>
     <div class="sc-row"><span class="sc-key"><kbd>C</kbd></span><span class="sc-label">Submit feedback</span></div>
     <div class="sc-row"><span class="sc-key"><kbd>A</kbd></span><span class="sc-label">Switch comparison</span></div>
+    <div class="sc-row"><span class="sc-key"><kbd>[</kbd> <kbd>]</kbd></span><span class="sc-label">Previous / next case</span></div>
     <div class="sc-row"><span class="sc-key">Alt + arrows</span><span class="sc-label">Review inside preview</span></div>
     <div class="sc-row"><span class="sc-key"><kbd>?</kbd></span><span class="sc-label">This help</span></div>
   </div>
@@ -310,6 +315,18 @@
     let pinned = null, comparison = null, compareMode = false, sideMode = false, pointMode = false;
     let comparisonGeneration = 0;
     const identity = m => `${m.workspace}:${m.id}`;
+    const selectedCases = new Map(); // workspace → case key, shared by every design in it
+    const casesOf = ws => {
+      const cases = briefs.get(ws)?.cases;
+      return cases && typeof cases === 'object' ? Object.entries(cases) : [];
+    };
+    function caseOf(m) {
+      const cases = casesOf(m?.workspace);
+      if (!cases.length || !m.contentHtml?.includes('mockupCase')) return null;
+      const key = selectedCases.get(m.workspace);
+      return cases.some(([k]) => k === key) ? key : cases[0][0];
+    }
+    const caseLabel = (ws, key) => casesOf(ws).find(([k]) => k === key)?.[1] || key;
     const draftKey = m => `${identity(m)}:r${m.revision}`;
 
     // ── DOM refs ─────────────────────────────────
@@ -354,7 +371,7 @@
     }
 
     // ── Iframe harness for mockup isolation ─────────
-    function buildIframeSrc(contentHtml, mockupId) {
+    function buildIframeSrc(contentHtml, mockupId, caseKey = null) {
       const scr = 'script';
       return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -364,6 +381,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Crimson+Pro:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,500;0,700;1,400;1,500&family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
 <${scr} src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></${scr}>
+${caseKey === null ? '' : `<${scr}>window.mockupCaseKey=${JSON.stringify(caseKey).replace(/</g, '\\u003c')};Object.defineProperty(window,"mockupCase",{configurable:true,get:function(){return window.mockupData&&window.mockupData[window.mockupCaseKey]}})</${scr}>`}
 </head><body>
 ${contentHtml}
 <${scr}>(function(){
@@ -420,8 +438,11 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       // this page, its Soniox key, or the server's endpoints.
       iframe.setAttribute('sandbox', 'allow-scripts');
       iframe.dataset.mockupId = identity(mockup);
-      iframe.onload = () => iframe.contentWindow?.postMessage({type:'review-point-mode',enabled:pointMode},'*');
-      iframe.srcdoc = buildIframeSrc(mockup.contentHtml, identity(mockup));
+      iframe.onload = () => {
+        iframe.contentWindow?.postMessage({type:'review-point-mode',enabled:pointMode},'*');
+        if (currentMockup() === mockup && mockup.scroll) iframe.contentWindow?.postMessage({type:'review-scroll',...mockup.scroll},'*');
+      };
+      setFrameSrc(iframe, mockup);
       content.appendChild(iframe);
 
       inner.appendChild(label);
@@ -454,6 +475,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       // changed the selection (initial load, a late-arriving workspace), not only goTo().
       if (m) carousel.style.transform = `translateX(-${mockups.indexOf(m) * 100}vw)`;
       updateReviewBrief();
+      renderCases(m);
       if (!m) return;
       neutralBtn.className = 'vote-btn' + (m.vote === 'neutral' ? ' active-up' : '');
       notesEl.disabled = btnUp.disabled = btnDown.disabled = neutralBtn.disabled = compareMode;
@@ -505,7 +527,16 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       if (m) {m.notes = notesEl.value;hasUserSelectedSession=true;queueDraft(m);}
       autoResize();
     });
-    notesEl.addEventListener('focus', () => { notesActive = true; });
+    notesEl.addEventListener('focus', () => {
+      notesActive = true;
+      const m = currentMockup();
+      if (m && !compareMode && tagCase(m)) {
+        notesEl.value = m.notes;
+        notesEl.setSelectionRange(m.notes.length, m.notes.length);
+        queueDraft(m);
+        autoResize();
+      }
+    });
     notesEl.addEventListener('blur', () => { notesActive = false; });
 
     // ── Keyboard ─────────────────────────────────
@@ -531,6 +562,8 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
           break;
         case 'a': case 'A':
           e.preventDefault(); toggleComparison(); break;
+        case '[': case ']':
+          e.preventDefault(); stepCase(e.key === ']' ? 1 : -1); break;
         case 'f': case 'F':
           if (!notesActive) { e.preventDefault(); toggleFit(); }
           break;
@@ -617,17 +650,20 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       if (ws) {
         const sessionLabel = currentSession !== null ? ` — Round ${currentSession}` : '';
         sections.push(`# Feedback — ${ws.id} (${ws.projectName}, ${ws.branch})${sessionLabel}\n# Submitted: ${new Date().toISOString()}`);
+        const cases = casesOf(ws.id);
+        if (cases.length) sections.push(`Cases: ${cases.map(([key, label]) => `${label} (${key})`).join(', ')}. A line such as [${cases[0][1]}] marks the case on screen when the notes below it were written.`);
       }
       for (const m of vis) {
         const vote = m.vote === 'up' ? '👍' : m.vote === 'down' ? '👎' : m.vote === 'neutral' ? 'reviewed, no preference' : '—';
-        const hasNotes = m.notes && m.notes.trim();
+        const notes = stripEmptyCaseTags(m);
+        const hasNotes = notes.trim();
         if (!hasNotes && !m.vote) continue;
         let section = `### #${m.number} ${m.label} (${m.id}, revision ${m.revision})  [${vote}]`;
-        if (hasNotes) section += '\n' + m.notes.trim();
+        if (hasNotes) section += '\n' + notes.trim();
         sections.push(section);
       }
       for (const [seen, label] of [[true, 'Viewed, no verdict'], [false, 'Not reviewed']]) {
-        const items = vis.filter(m => !!m.seen === seen && !m.vote && !m.notes.trim());
+        const items = vis.filter(m => !!m.seen === seen && !m.vote && !stripEmptyCaseTags(m).trim());
         if(items.length) sections.push(`### ${label}\n` + items.map(m=>`- #${m.number} ${m.label} (${m.id}, revision ${m.revision})`).join('\n'));
       }
       return sections.join('\n\n').trim();
@@ -773,6 +809,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       transcript = { final: '', nonfinal: '' };
       barHeights.fill(0);
       const m = currentMockup();
+      tagCase(m);
       recordingTarget = {...m};
       preRecordingNotes = m ? (m.notes || '').trimEnd() : '';
 
@@ -924,7 +961,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         updateWorkspaceTabs();
       });
       es.addEventListener('init-complete', () => { initialized = true;markSeen(currentMockup());refreshReferences(); });
-      es.addEventListener('brief',e=>{const data=JSON.parse(e.data);briefs.set(data.workspace,data.brief);if(data.drafts){for(const review of Object.values(data.drafts)){drafts.set(`${data.workspace}:${review.id}:r${review.revision}`,review)}}for(const m of mockups.filter(m=>m.workspace===data.workspace))restoreDraft(m);updateReviewBrief();updateUI();});
+      es.addEventListener('brief',e=>{const data=JSON.parse(e.data);briefs.set(data.workspace,data.brief);if(data.drafts){for(const review of Object.values(data.drafts)){drafts.set(`${data.workspace}:${review.id}:r${review.revision}`,review)}}for(const m of mockups.filter(m=>m.workspace===data.workspace))restoreDraft(m);syncCaseFrames(data.workspace);updateReviewBrief();updateUI();});
       es.addEventListener('draft',e=>{const data=JSON.parse(e.data);const key=`${data.workspace}:${data.review.id}:r${data.review.revision}`;drafts.set(key,data.review);const m=mockups.find(m=>draftKey(m)===key);if(m&&!m.pendingSave){restoreDraft(m);updateUI()}});
       es.addEventListener('workspace-error',e=>{const data=JSON.parse(e.data);if(data.workspace===currentWorkspace)setStatus(data.error,true)});
       es.addEventListener('session-closed', () => {});
@@ -1093,7 +1130,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       if (slides[idx]) {
         const iframe = slides[idx].querySelector('iframe');
         const label = slides[idx].querySelector('.slide-label');
-        if (iframe) iframe.srcdoc = buildIframeSrc(parsed.contentHtml, identity(mockups[idx]));
+        if (iframe) setFrameSrc(iframe, mockups[idx]);
         if (label) label.textContent = `#${mockups[idx].number} · ${mockups[idx].label}`;
       }
       updateUI();
@@ -1187,6 +1224,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         m.scroll={x:e.data.x,y:e.data.y};
       } else if(m && e.data.type==='review-point' && pointMode && !compareMode) {
         const anchor=`[${String(e.data.region).slice(0,80)}: ${String(e.data.text).slice(0,120)}] `;
+        tagCase(m);
         m.notes=(m.notes?m.notes+'\n':'')+anchor;
         notesEl.value=m.notes;notesEl.focus();queueDraft(m);autoResize();
         pointMode=false;setPointMode();
@@ -1212,6 +1250,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       const review = local && (!saved || local.clientUpdated > saved.clientUpdated) ? local : saved;
       if (review) {
         m.notes = review.notes || "";
+        m.noteCase = lastTaggedCase(m);
         m.vote = review.vote || null;
         m.seen = review.seen === true;
       }
@@ -1271,6 +1310,78 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       const active = currentMockup();
       if (active && draftKey(active) === draftKey(m) && review.clientUpdated === active.clientUpdated)
         active.pendingSave = false;
+    }
+    const caseTag = label => `[${label}]`;
+    function tagCase(m) {
+      const key = caseOf(m);
+      if (key === null || m.noteCase === key) return false;
+      m.notes = (m.notes ? m.notes.trimEnd() + '\n' : '') + caseTag(caseLabel(m.workspace, key)) + '\n';
+      m.noteCase = key;
+      return true;
+    }
+    function lastTaggedCase(m) {
+      const tags = new Map(casesOf(m.workspace).map(([key, label]) => [caseTag(label), key]));
+      const lines = (m.notes || '').split('\n').map(line => line.trim()).filter(line => tags.has(line));
+      return lines.length ? tags.get(lines.at(-1)) : undefined;
+    }
+    function stripEmptyCaseTags(m) {
+      const tags = new Set(casesOf(m.workspace).map(([, label]) => caseTag(label)));
+      const lines = (m.notes || '').split('\n');
+      return lines.filter((line, i) => {
+        if (!tags.has(line.trim())) return true;
+        const next = lines.slice(i + 1).find(l => l.trim());
+        return next !== undefined && !tags.has(next.trim());
+      }).join('\n');
+    }
+    function renderCases(m) {
+      const el = $('cases');
+      const cases = casesOf(m?.workspace);
+      const shown = m ? caseOf(m) : null;
+      el.hidden = shown === null;
+      if (shown === null) return el.replaceChildren();
+      el.replaceChildren(...cases.map(([key, label]) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.title = 'Show this case in every design ([ / ])';
+        b.setAttribute('aria-pressed', String(key === shown));
+        b.onclick = () => setCase(m.workspace, key);
+        return b;
+      }));
+    }
+    function stepCase(dir) {
+      const m = currentMockup();
+      const cases = casesOf(m?.workspace);
+      const shown = m && caseOf(m);
+      if (!shown || recording) return;
+      const i = cases.findIndex(([key]) => key === shown);
+      setCase(m.workspace, cases[(i + dir + cases.length) % cases.length][0]);
+    }
+    function setCase(ws, key) {
+      if (recording || selectedCases.get(ws) === key && caseOf(currentMockup()) === key) return;
+      selectedCases.set(ws, key);
+      syncCaseFrames(ws);
+      const other = activeSlide()?.querySelector('.comparison-frame');
+      if (other && comparison && !comparison.caseKey)
+        other.srcdoc = buildIframeSrc(comparison.contentHtml, other.dataset.mockupId, caseOf(comparison));
+      if (comparison?.caseKey === key) { closeComparison(); referenceEl.value = ''; }
+      renderCases(currentMockup());
+      // A running revision comparison keeps its reference; otherwise list the other cases.
+      if (!comparison) refreshReferences();
+      setStatus(`Case: ${caseLabel(ws, key)}`);
+    }
+    function syncCaseFrames(ws) {
+      const slides = carousel.querySelectorAll('.slide');
+      mockups.forEach((mk, i) => {
+        if (mk.workspace !== ws) return;
+        const frame = slides[i]?.querySelector('iframe:not(.comparison-frame)');
+        const key = caseOf(mk);
+        if (frame && (frame.dataset.caseKey || null) !== key) setFrameSrc(frame, mk);
+      });
+    }
+    function setFrameSrc(frame, mk) {
+      const key = caseOf(mk);
+      if (key === null) delete frame.dataset.caseKey; else frame.dataset.caseKey = key;
+      frame.srcdoc = buildIframeSrc(mk.contentHtml, identity(mk), key);
     }
     function updateReviewBrief() {
       const brief = briefs.get(currentWorkspace) || {};
@@ -1332,6 +1443,10 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         if (generation !== comparisonGeneration || currentMockup() !== m) return;
         referenceEl.replaceChildren(new Option("Choose…", ""));
         if (pinned) referenceEl.add(new Option(`Pinned #${pinned.number} r${pinned.revision}`, "pin"));
+        const shown = caseOf(m);
+        if (shown !== null)
+          for (const [key, label] of casesOf(m.workspace).filter(([key]) => key !== shown))
+            referenceEl.add(new Option(`#${m.number} · ${label}`, `case:${key}`));
         for (const revision of revisions.filter((r) => r.revision !== m.revision).reverse())
           referenceEl.add(
             new Option(
@@ -1360,6 +1475,7 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
       try {
         let target;
         if (value === "pin") target = pinned;
+        else if (value.startsWith("case:")) target = { ...m, caseKey: value.slice(5) };
         else {
           const [, archivedId, archivedRevision] = value.split(":");
           const id = archivedId || m.id;
@@ -1380,13 +1496,13 @@ var n=0,t=setInterval(function(){report();if(++n>=20)clearInterval(t)},200);
         frame.className = "comparison-frame";
         frame.setAttribute("sandbox", "allow-scripts");
         frame.dataset.mockupId = identity(target) + ":reference";
-        frame.srcdoc = buildIframeSrc(target.contentHtml, frame.dataset.mockupId);
+        frame.srcdoc = buildIframeSrc(target.contentHtml, frame.dataset.mockupId, target.caseKey ?? caseOf(target));
         frame.style.display = "none";
         activeSlide().querySelector(".slide-content").appendChild(frame);
         $("compare-btn").disabled = $("side-btn").disabled = false;
         updateReviewBrief();
         setStatus(
-          `Reference: #${target.number} r${target.revision}. A/B keeps the same viewport width.`,
+          `Reference: #${target.number} r${target.revision}${target.caseKey ? ` · ${caseLabel(m.workspace, target.caseKey)}` : ""}. A/B keeps the same viewport width.`,
         );
       } catch (error) {
         setStatus(error.message, true);

@@ -92,9 +92,19 @@ function compose(dir, file, brief = readBrief(dir)) {
     html = `<section class="mockup-section" data-mockup-id="${escapeAttr(id)}" data-label="${escapeAttr(variant.label)}">${variant.css ? `<style>${variant.css}</style>` : ""}${body}${variant.script ? `<script>${variant.script}</script>` : ""}</section>`;
   }
   const styles = (brief.styles || []).map((file) => `<style>${read(file)}</style>`).join("");
-  const data = brief.data
-    ? `<script>window.mockupData=${scriptJSON(JSON.parse(read(brief.data)))};</script>`
-    : "";
+  const fixture = brief.data ? JSON.parse(read(brief.data)) : undefined;
+  if (brief.cases !== undefined) {
+    const cases = brief.cases;
+    if (!cases || typeof cases !== "object" || Array.isArray(cases) || !Object.keys(cases).length)
+      throw new Error("cases must map data keys to labels");
+    if (!fixture || typeof fixture !== "object" || Array.isArray(fixture))
+      throw new Error("cases need a data object keyed by case");
+    for (const [key, label] of Object.entries(cases)) {
+      if (typeof label !== "string" || !label.trim()) throw new Error(`Case ${key} needs a label`);
+      if (!Object.hasOwn(fixture, key)) throw new Error(`Case ${key} is not a key in ${brief.data}`);
+    }
+  }
+  const data = brief.data ? `<script>window.mockupData=${scriptJSON(fixture)};</script>` : "";
   const prefix = styles + data;
   if (prefix) {
     const legacyContent = /<[^>]+class=["'][^"']*\bmockup-content\b[^"']*["'][^>]*>/i;
@@ -105,7 +115,7 @@ function compose(dir, file, brief = readBrief(dir)) {
       html = `<section class="mockup-section" data-mockup-id="${escapeAttr(id)}">${prefix}${html}</section>`;
   }
   html = html.replace(
-    /\b(src|poster)=(['"])(shared\/[^'"]+)\2/g,
+    /(?<=\s)(src|poster)=(['"])(shared\/[^'"]+)\2/g,
     (match, attr, quote, relative) => {
       const types = {
         ".png": "image/png",
