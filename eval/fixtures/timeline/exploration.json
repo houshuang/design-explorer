@@ -1,0 +1,10 @@
+{
+  "question": "How light can the plan timeline be on entity pages and still show when and in which school the entity appears?",
+  "state": "Entity page head, desktop",
+  "approved": ["Keep the full 3-lane timeline on /planer/ and /tid/", "Headline only: no explanatory prose"],
+  "avoid": ["Drawing all plans at equal weight on entity pages"],
+  "base": "shared/page.html",
+  "styles": ["shared/product.css"],
+  "data": "shared/evidence.json",
+  "viewport": {"width": 1280}
+}

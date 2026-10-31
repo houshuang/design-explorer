@@ -25,6 +25,19 @@ The viewport supplies an actual iframe width/height, including its internal scro
 
 Raw `mockup-*.html` files also inherit shared styles/data, but do not use the shared base. This makes independent layouts easy without repeating their design tokens. A JSON variant's `html` similarly supplies a complete fragment body; it ignores the base and cannot be combined with `slots`.
 
+## Cases
+
+Use cases only when the decision depends on how a design handles different content (one entry with little data and one with a lot, a long name, an empty section) or the user asks for named entries. A single representative entry needs no cases: read `window.mockupData` as usual, since `mockupCase` exists only when the brief declares cases.
+
+Key the fixture by case and label each key in the brief:
+
+```json
+"data": "shared/people.json",
+"cases": {"bergen": "Bergen · 3", "ibsen": "Henrik Ibsen · 41"}
+```
+
+Each preview is loaded with one case and reloaded when the reviewer switches; `window.mockupCase` is that case's object (`window.mockupCaseKey` its key, `window.mockupData` the whole fixture). Render it once at load, as you would a single record: no switch buttons, re-render or cleanup code. A script in the shared base can fill the common parts, such as the page title, for every variant. The reviewer shows the cases in its toolbar, keeps one case across all designs, compares a design with itself in another case, and marks each note with the case on screen. `bin/lineup` flags a design that never reads `mockupCase`.
+
 ## Region variants
 
 Give the shared page named slots with sensible initial content:

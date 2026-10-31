@@ -126,11 +126,12 @@ function labelOf(html, mockupId) {
 }
 
 function lineupRounds(ws) {
+  const cases = JSON.parse(ws.briefJSON || '{}').cases;
   return ws.sessions.map(session => ({
     round: session.id, label: session.label || '', open: !session.closed,
     mockups: [...ws.knownFiles]
       .filter(([, data]) => data.session === session.id)
-      .map(([file, data]) => ({ number: data.number, label: labelOf(data.html, file.replace(/\.(html|json)$/, '')), file }))
+      .map(([file, data]) => ({ number: data.number, label: labelOf(data.html, file.replace(/\.(html|json)$/, '')), file, ignoresCases: !!cases && !data.html.includes('mockupCase') }))
       .sort((a, b) => a.number - b.number),
   })).filter(r => r.mockups.length > 0).reverse();
 }
@@ -145,7 +146,7 @@ function formatLineup(rounds, errors = []) {
   return [
     ...rounds.map(r => [
       `Round ${r.round}${r.label ? ' · ' + r.label : ''}${r.open ? ' (open)' : ''}`,
-      ...r.mockups.map(m => `  #${m.number}  ${m.label}  (${m.file})`),
+      ...r.mockups.map(m => `  #${m.number}  ${m.label}  (${m.file})${m.ignoresCases ? '  [same for every case: never reads mockupCase]' : ''}`),
     ].join('\n')),
     ...(errors.length ? [['Not shown (fix and save to retry):',
       ...errors.map(e => `  ${e.file}: ${e.error}`)].join('\n')] : []),
@@ -242,7 +243,7 @@ function scanWorkspace(ws) {
     try {
       const stat = fs.statSync(path.join(ws.mockupDir, file));
       const existing = ws.knownFiles.get(file) || [...ws.knownFiles].find(([previous]) => previous.replace(/\.(html|json)$/, '') === id)?.[1];
-      const renderConfig = JSON.stringify({ base: brief.base, styles: brief.styles, data: brief.data });
+      const renderConfig = JSON.stringify({ base: brief.base, styles: brief.styles, data: brief.data, cases: brief.cases });
       if (ws.knownFiles.has(file) && existing.mtime === stat.mtimeMs && existing.renderConfig === renderConfig && workspace.dependenciesUnchanged(ws.mockupDir, existing.dependencies || {})) continue;
       const { html, dependencies } = workspace.compose(ws.mockupDir, file, brief);
       if (existing && html === existing.html && stat.mtimeMs === existing.mtime) {
@@ -515,16 +516,17 @@ async function handleRequest(req, res) {
     // Send existing mockups + sessions for relevant workspaces
     for (const [id, ws] of workspaces) {
       if (wsId && wsId !== id) continue;
+      // The brief goes first: it carries the drafts and the cases each preview is built with.
+      try {
+        res.write(`event: brief\ndata: ${JSON.stringify({ workspace: id, brief: workspace.readBrief(ws.mockupDir), drafts: workspace.readDrafts(ws.mockupDir) })}\n\n`);
+      } catch (error) {
+        res.write(`event: workspace-error\ndata: ${JSON.stringify({ workspace: id, error: error.message })}\n\n`);
+      }
       for (const [file, data] of ws.knownFiles) {
         res.write(`event: add\ndata: ${JSON.stringify({
           id: file.replace(/\.(html|json)$/, ''), html: data.html,
           session: data.session, number: data.number, revision: data.revision, workspace: id,
         })}\n\n`);
-      }
-      try {
-        res.write(`event: brief\ndata: ${JSON.stringify({ workspace: id, brief: workspace.readBrief(ws.mockupDir), drafts: workspace.readDrafts(ws.mockupDir) })}\n\n`);
-      } catch (error) {
-        res.write(`event: workspace-error\ndata: ${JSON.stringify({ workspace: id, error: error.message })}\n\n`);
       }
       for (const session of ws.sessions) {
         res.write(`event: session\ndata: ${JSON.stringify({ ...session, workspace: id })}\n\n`);

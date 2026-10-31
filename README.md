@@ -16,6 +16,8 @@ The helper creates a private directory inside `/tmp/claude/design-explorer`, reg
 
 Choose freely between full `mockup-*.html` fragments and `mockup-*.json` variants. Reuse approved styles, fixture data, local images or a shared page once. JSON variants can replace named page slots, override CSS, or supply independent HTML. No component library or layout vocabulary is required.
 
+When a decision depends on how designs cope with different content (a sparse and a dense record), `exploration.json` can name `cases` from the fixture. Each design then renders one case; the reviewer switches all designs between cases, compares a design with itself in another case, and marks notes with the case on screen. One representative record needs no cases.
+
 See [the fragment reference](references/fragments.md) for the exact formats and examples. `exploration.json` holds the question, initial state, viewport, approved constraints, exclusions and optional shared files. Changes to shared files recompose dependent designs. Keep meaningful typography, spacing, representative content and working controls; inspect desktop and mobile renderings before presenting a round.
 
 The paired real-model evaluation saved about 49–56% of output tokens for two narrow decisions. Broad layouts needed substantially more bespoke output; after equal repair passes they cost about 5% more output than the original workflow. Blind screenshot review preferred the revised narrow designs and, after repairs, modestly preferred the revised broad set. This small sample is evidence of useful reuse, not a universal quality or speed guarantee. See [evaluation methodology and results](eval/README.md).
@@ -58,6 +60,7 @@ Submitted feedback is written to `feedback-round-N.md`, with numbers, revision r
 | Tab / Esc | Focus / blur notes |
 | F | Fit to window |
 | A | Switch current/reference |
+| [ / ] | Previous / next case |
 | Alt + arrows | Navigate/vote from inside a preview |
 | C | Submit feedback |
 | Hold Space | Dictate, when voice is enabled |
