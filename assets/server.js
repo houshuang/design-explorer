@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { exec } = require('child_process');
 const workspace = require('./workspace');
+const { buildPreview } = require('./preview');
 
 // ── Config ──────────────────────────────────────
 const args = process.argv.slice(2);
@@ -34,7 +35,7 @@ const ALLOWED_ORIGINS = new Set([...ALLOWED_HOSTS].map(h => `http://${h}`));
 // bin/register compares this with the installed files and restarts a stale server.
 const SERVER_SRC = fs.readFileSync(__filename);
 const TEMPLATE_SRC = fs.readFileSync(HARNESS);
-const CODE_HASH = crypto.createHash('sha256').update(SERVER_SRC).update(TEMPLATE_SRC).update(fs.readFileSync(path.join(__dirname, 'workspace.js'))).digest('hex');
+const CODE_HASH = crypto.createHash('sha256').update(SERVER_SRC).update(TEMPLATE_SRC).update(fs.readFileSync(path.join(__dirname, 'workspace.js'))).update(fs.readFileSync(path.join(__dirname, 'preview.js'))).digest('hex');
 
 // ── Legacy mode: if --dir is passed, run as single-workspace server ──
 const LEGACY_DIR = getArg('dir', null);
@@ -466,7 +467,7 @@ function workspaceSummary(ws) {
 }
 
 // ── HTTP Server ──────────────────────────────────
-const template = TEMPLATE_SRC.toString('utf8');
+const template = TEMPLATE_SRC.toString('utf8').replace('/*__PREVIEW_JS__*/', () => fs.readFileSync(path.join(__dirname, 'preview.js'), 'utf8'));
 let browserOpened = false;
 
 const server = http.createServer((req, res) => {
@@ -575,6 +576,30 @@ async function handleRequest(req, res) {
     const ws = workspaceFromPath(url.pathname);
     if (!ws) { res.writeHead(404); res.end('Workspace not found'); return; }
     sendJson(res, 200, getOrCreateOpenSession(ws) || {});
+
+  // ── One design as a standalone page, for bin/shot ──
+  } else if (req.method === 'GET' && url.pathname === '/preview') {
+    const mockupDir = resolveMockupDir(url.searchParams.get('dir'));
+    const ws = mockupDir && [...workspaces.values()].find(w => w.mockupDir === mockupDir);
+    if (!ws) { sendJson(res, 404, { error: 'dir is not registered; run bin/register first' }); return; }
+    pushWorkspaceChanges(ws);
+    const wanted = url.searchParams.get('design') || '';
+    const entry = [...ws.knownFiles].find(([file, data]) => String(data.number) === wanted.replace(/^#/, '') || file.replace(/\.(html|json)$/, '') === wanted || file === wanted);
+    if (!entry) { sendJson(res, 404, { error: `No design ${wanted}; see bin/lineup` }); return; }
+    const [file, data] = entry;
+    const cases = JSON.parse(ws.briefJSON || '{}').cases || null;
+    const caseKey = url.searchParams.get('case');
+    if (caseKey && !(cases && Object.hasOwn(cases, caseKey))) { sendJson(res, 404, { error: `No case ${caseKey}` }); return; }
+    // The reviewer renders the section's content, not the section element itself.
+    const inner = data.html.match(/^\s*<section\b[^>]*>([\s\S]*)<\/section>\s*$/i);
+    const page = buildPreview(inner ? inner[1] : data.html, `${ws.id}:${file.replace(/\.(html|json)$/, '')}`, cases && data.html.includes('mockupCase') ? (caseKey || Object.keys(cases)[0]) : null);
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      // Same isolation as the reviewer's iframes: design scripts get an opaque origin.
+      'Content-Security-Policy': 'sandbox allow-scripts',
+    });
+    res.end(page);
 
   // ── Lineup: numbered mockups per round (bin/lineup) ──
   } else if (req.method === 'GET' && url.pathname === '/lineup') {
