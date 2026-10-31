@@ -44,6 +44,9 @@ New activity in another workspace shows a badge without taking focus. Not review
 ~/.claude/skills/design-explorer/bin/round --dir /tmp/claude/design-explorer/mockups/example --label "Refinements"
 ~/.claude/skills/design-explorer/bin/lineup --dir /tmp/claude/design-explorer/mockups/example
 
+# Full-page PNGs of the latest round, every case, at two widths (needs Chrome or Playwright's headless shell).
+~/.claude/skills/design-explorer/bin/shot --dir /tmp/claude/design-explorer/mockups/example --width 1280,390
+
 # Wait at most 60 seconds; a submission hash can exclude an older result.
 ~/.claude/skills/design-explorer/bin/feedback --dir /tmp/claude/design-explorer/mockups/example --round 2 --wait-seconds 60
 # Add --after HASH to wait for a later submission.
@@ -78,11 +81,11 @@ Node.js 18+ and a modern browser are required. The server has no npm dependencie
 
 ## Runtime and verification
 
-`assets/server.js` watches workspaces and handles rounds, feedback and revisions. `assets/workspace.js` composes files, embeds local image bytes, snapshots revisions and saves drafts. `assets/harness-template.html` renders isolated previews with Tailwind, Google Fonts and Lucide. Raw fragments and the legacy mockup-content wrapper remain supported.
+`assets/server.js` watches workspaces and handles rounds, feedback and revisions. `assets/workspace.js` composes files, embeds local image bytes, snapshots revisions and saves drafts. `assets/preview.js` builds the preview document with Tailwind, Google Fonts and Lucide, for the reviewer's sandboxed iframes and for `/preview`, which `bin/shot` captures through one headless Chrome over the DevTools protocol (Node 22+, no npm dependency). Raw fragments and the legacy mockup-content wrapper remain supported.
 
 The server binds only to 127.0.0.1, rejects foreign hosts/origins and non-JSON POSTs, and confines workspace/shared paths after symlink resolution. Previews use `sandbox="allow-scripts"` without same-origin access. They cannot read the parent's voice key or persistence. Shared inputs are trusted design code, not a sanitised template language.
 
-Registration checks a hash of all three runtime files and restarts stale code while preserving registrations. Default registry, PID and logs live under `~/.claude`; `--state-dir` on begin/register/server isolates test state, and `--port` selects a private test port. `bin/status` and `bin/stop` operate on the default singleton.
+Registration checks a hash of the four runtime files and restarts stale code while preserving registrations. Default registry, PID and logs live under `~/.claude`; `--state-dir` on begin/register/server isolates test state, and `--port` selects a private test port. `bin/status` and `bin/stop` operate on the default singleton.
 
 ```bash
 node --test test/server.test.js test/workspace.test.js

@@ -44,7 +44,7 @@ mkdir -p "$DIR" "$STATE_DIR"
 LOG_FILE="$STATE_DIR/design-explorer.log"
 
 BASE="http://127.0.0.1:$PORT"
-EXPECTED_HASH=$(cat "$SERVER_JS" "$TEMPLATE" "$SKILL_DIR/assets/workspace.js" | node -e '
+EXPECTED_HASH=$(cat "$SERVER_JS" "$TEMPLATE" "$SKILL_DIR/assets/workspace.js" "$SKILL_DIR/assets/preview.js" | node -e '
   const h = require("crypto").createHash("sha256");
   process.stdin.on("data", d => h.update(d)).on("end", () => console.log(h.digest("hex")));')
 

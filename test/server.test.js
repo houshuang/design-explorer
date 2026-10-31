@@ -81,6 +81,7 @@ test('health reports the code hash of server, harness and composer', async () =>
     .update(fs.readFileSync(path.join(REPO, 'assets/server.js')))
     .update(fs.readFileSync(path.join(REPO, 'assets/harness-template.html')))
     .update(fs.readFileSync(path.join(REPO, 'assets/workspace.js')))
+    .update(fs.readFileSync(path.join(REPO, 'assets/preview.js')))
     .digest('hex');
   const r = JSON.parse((await request({ pathname: '/health' })).body);
   assert.equal(r.app, 'design-explorer');
@@ -345,6 +346,64 @@ test('bin/lineup marks designs that never read mockupCase when the brief has cas
     // The brief precedes the designs, so the reviewer knows the cases before it builds a preview.
     const events = (await request({ pathname: `/events?workspace=${path.basename(dir)}`, headers: { Accept: 'text/event-stream' } })).body;
     assert.ok(events.indexOf('event: brief') < events.indexOf('event: add'));
+  } finally {
+    await request({ method: 'DELETE', pathname: `/workspace/${path.basename(dir)}` });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('/preview serves one design in one case, sandboxed, without its section wrapper', async () => {
+  const dir = `${MOCKUP_DIR}-preview`;
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'shared/people.json'), JSON.stringify({ light: { name: 'Bergen' }, heavy: { name: 'Henrik Ibsen' } }));
+  fs.writeFileSync(path.join(dir, 'exploration.json'), JSON.stringify({ data: 'shared/people.json', cases: { light: 'Bergen', heavy: 'Henrik Ibsen' } }));
+  try {
+    assert.equal((await register(['--project', REPO, '--dir', dir, '--port', String(PORT)])).code, 0);
+    fs.writeFileSync(path.join(dir, 'mockup-reads.json'), JSON.stringify({ label: 'Reads', html: '<h1 id=n></h1><script>n.textContent=mockupCase.name</script>' }));
+    await waitForSessions(dir, (s) => s.length === 1 && s[0].mockups.length === 1);
+    const preview = (query) => request({ pathname: `/preview?${new URLSearchParams({ dir, ...query })}` });
+    const page = await preview({ design: '1', case: 'heavy' });
+    assert.equal(page.status, 200);
+    assert.equal(page.headers['content-security-policy'], 'sandbox allow-scripts');
+    assert.match(page.body, /window\.mockupCaseKey="heavy"/);
+    assert.doesNotMatch(page.body, /class="mockup-section"/);
+    assert.match((await preview({ design: 'mockup-reads' })).body, /window\.mockupCaseKey="light"/);
+    assert.equal((await preview({ design: '1', case: 'nobody' })).status, 404);
+    assert.equal((await preview({ design: '9' })).status, 404);
+  } finally {
+    await request({ method: 'DELETE', pathname: `/workspace/${path.basename(dir)}` });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Playwright's headless shell under the real home, else whatever bin/shot finds itself.
+const REAL_HOME = os.userInfo().homedir;
+const SHELLS = path.join(REAL_HOME, 'Library/Caches/ms-playwright');
+const CHROME = process.env.CHROME || (fs.existsSync(SHELLS) ? fs.readdirSync(SHELLS).filter((d) => d.startsWith('chromium_headless_shell-')).sort().reverse()
+  .map((d) => path.join(SHELLS, d, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell')).find((f) => fs.existsSync(f)) : undefined)
+  || ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find((f) => fs.existsSync(f));
+
+test('bin/shot captures every case at each width and reports page errors', { skip: !CHROME && 'no Chrome' }, async () => {
+  const dir = `${MOCKUP_DIR}-shot`;
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'shared/people.json'), JSON.stringify({ light: { name: 'Bergen', n: 2 }, heavy: { name: 'Henrik Ibsen', n: 60 } }));
+  fs.writeFileSync(path.join(dir, 'exploration.json'), JSON.stringify({ data: 'shared/people.json', cases: { light: 'Bergen', heavy: 'Henrik Ibsen' } }));
+  try {
+    assert.equal((await register(['--project', REPO, '--dir', dir, '--port', String(PORT)])).code, 0);
+    fs.writeFileSync(path.join(dir, 'mockup-list.json'), JSON.stringify({ label: 'List', html: '<ul id=l></ul><script>l.innerHTML="<li style=\\"height:40px\\">x</li>".repeat(mockupCase.n)</script>' }));
+    fs.writeFileSync(path.join(dir, 'mockup-broken.json'), JSON.stringify({ label: 'Broken', html: '<p>x</p><script>mockupCase.missing.field</script>' }));
+    await waitForSessions(dir, (s) => s.length === 1 && s[0].mockups.length === 2);
+    const result = await new Promise((resolve) => execFile(path.join(REPO, 'bin', 'shot'), ['--dir', dir, '--port', String(PORT), '--width', '1280,390'],
+      { env: { ...env, CHROME }, timeout: 90000 }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, stdout, stderr })));
+    assert.equal(result.code, 0, result.stderr);
+    const lines = result.stdout.trim().split('\n');
+    assert.equal(lines.length, 8);
+    const list = lines.filter((l) => l.includes(' List '));
+    assert.ok(list.every((l) => /tall; ok$/.test(l)), list.join('\n'));
+    const tall = (key) => Number(list.find((l) => l.includes(`· ${key} · 1280px`)).match(/(\d+)px tall/)[1]);
+    assert.ok(tall('Henrik Ibsen') > tall('Bergen') + 2000);
+    assert.ok(lines.filter((l) => l.includes(' Broken ')).every((l) => /errors: TypeError/.test(l)));
+    for (const line of lines) assert.ok(fs.existsSync(line.match(/→ (\S+\.png)/)[1]));
   } finally {
     await request({ method: 'DELETE', pathname: `/workspace/${path.basename(dir)}` });
     fs.rmSync(dir, { recursive: true, force: true });
